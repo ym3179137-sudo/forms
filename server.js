@@ -18,11 +18,13 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+// ─── login auth ──────────────────────────────────────────────
 const OPEN_PATHS = new Set(["/api/health", "/api/login"]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
   if (req.method === "GET" && !req.path.startsWith("/api/")) return next();
   if (req.path === "/") return next();
+
   const token = req.headers["x-ixl-token"] || req.query.token;
   const payload = verify(token);
   if (!payload) return res.status(401).json({ error: "not logged in" });
@@ -34,13 +36,14 @@ app.post("/api/login", (req, res) => {
   const { username, password } = req.body || {};
   const token = login(username, password);
   if (!token) return res.status(401).json({ error: "invalid username or password" });
+  console.log(`[auth] ${username} logged in`);
   res.json({ token, username });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 app.get("/api/status", (req, res) => res.json(getStatus()));
 
-// ─── ixl creds ──────────────────────────────────────────────
+// ─── ixl creds ───────────────────────────────────────────────
 app.get("/api/ixl-creds", async (req, res) => {
   const creds = await getIxlCreds(req.ixlUser);
   if (!creds) return res.json({ email: "", password: "", has: false });
@@ -53,7 +56,7 @@ app.post("/api/ixl-creds", async (req, res) => {
   res.json({ ok });
 });
 
-// ─── sessions ───────────────────────────────────────────────
+// ─── sessions ────────────────────────────────────────────────
 const sessions = new Map();
 
 function broadcast(sessionId, msg) {
@@ -77,6 +80,7 @@ app.post("/api/start", async (req, res) => {
     return res.status(503).json({ error: "queue timeout — try again shortly" });
   }
 
+  console.log(`[solver] session ${sessionId} for ${user}`);
   res.json({ sessionId });
 
   const sessionConfig = JSON.parse(JSON.stringify(config));
@@ -102,12 +106,16 @@ app.post("/api/start", async (req, res) => {
         });
         entry.liveView = live;
 
-        broadcast(sessionId, { type: "view-ready" });
+        const vp = await page.evaluate(() => ({
+          w: window.innerWidth,
+          h: window.innerHeight
+        })).catch(() => ({ w: 1366, h: 768 }));
+
+        console.log(`[solver ${sessionId}] viewport = ${vp.w}x${vp.h}`);
+        broadcast(sessionId, { type: "view-ready", viewportW: vp.w, viewportH: vp.h });
         broadcast(sessionId, { type: "url", url: await live.currentUrl() });
 
-        // if user has stored ixl creds, try auto-login
         if (ixlCreds && ixlCreds.email && ixlCreds.password) {
-          broadcast(sessionId, { type: "log", message: "auto-login IXL: checking page..." });
           setTimeout(async () => {
             const r = await live.tryAutoLoginIxl(ixlCreds.email, ixlCreds.password);
             if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login IXL: submitted" });
@@ -143,7 +151,7 @@ app.post("/api/stop/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── ws ─────────────────────────────────────────────────────
+// ─── ws ──────────────────────────────────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
@@ -152,13 +160,16 @@ server.on("upgrade", (req, socket, head) => {
   try { pathname = new URL(req.url, "http://localhost").pathname; } catch (_) { }
   if (pathname === "/ws") {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-  } else socket.destroy();
+  } else {
+    socket.destroy();
+  }
 });
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, "http://localhost");
   const sessionId = url.searchParams.get("sessionId");
   const token = url.searchParams.get("token");
+
   if (!sessionId || !verify(token)) return ws.close(4001, "auth");
   const entry = sessions.get(sessionId);
   if (!entry) return ws.close(4004, "no session");
@@ -170,7 +181,9 @@ wss.on("connection", (ws, req) => {
   entry.pingInterval = setInterval(() => {
     if (ws.readyState === 1) {
       try { ws.send(JSON.stringify({ type: "ping", t: Date.now() })); } catch (_) { }
-    } else clearInterval(entry.pingInterval);
+    } else {
+      clearInterval(entry.pingInterval);
+    }
   }, 15000);
 
   ws.on("message", async (raw) => {
@@ -179,9 +192,8 @@ wss.on("connection", (ws, req) => {
 
     if (msg.type === "input" && entry.liveView) {
       const payload = msg.payload || msg;
-      // handle copy-request specially — needs to reply
+
       if (payload.type === "copy-request") {
-        // chromium clipboard: use CDP Runtime.evaluate on the page
         try {
           const cdp = entry.liveView.cdp;
           if (!cdp) throw new Error("no cdp");
@@ -219,6 +231,7 @@ wss.on("connection", (ws, req) => {
   });
 });
 
+// ─── listen ──────────────────────────────────────────────────
 const port = process.env.PORT || config.server.port;
 const host = process.env.PORT ? "0.0.0.0" : config.server.host;
 server.listen(port, host, () => {

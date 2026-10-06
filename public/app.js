@@ -8,15 +8,13 @@ let username = localStorage.getItem("ixl_user") || "";
 
 let canvas = null;
 let ctx = null;
-let currentFrameSize = { width: 1366, height: 768 };
+let currentViewport = { w: 1366, h: 768 };
 let lastClickTime = 0;
 let clickCount = 0;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 let frameCount = 0;
 let lastFrameAt = 0;
-let lastMouseX = 0;
-let lastMouseY = 0;
 
 function setViewStatus(s) {
   const v = el("viewer-status");
@@ -33,13 +31,7 @@ function attachCanvas() {
 
   canvas.addEventListener("mousedown", (e) => { canvas.focus(); sendMouse(e, "down"); e.preventDefault(); });
   canvas.addEventListener("mouseup", (e) => { sendMouse(e, "up"); e.preventDefault(); });
-  canvas.addEventListener("mousemove", (e) => {
-    // throttle: only send if moved by more than 1 pixel in image space
-    const { x, y } = scaleCoords(e);
-    if (Math.abs(x - lastMouseX) < 1.5 && Math.abs(y - lastMouseY) < 1.5) return;
-    lastMouseX = x; lastMouseY = y;
-    sendMouse(e, "move");
-  });
+  canvas.addEventListener("mousemove", (e) => sendMouse(e, "move"));
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
   canvas.addEventListener("wheel", (e) => {
@@ -51,7 +43,7 @@ function attachCanvas() {
   canvas.addEventListener("keydown", (e) => {
     if (e.ctrlKey && (e.key === "m" || e.key === "M")) { e.preventDefault(); e.stopPropagation(); togglePanic(); return; }
     if (e.ctrlKey && (e.key === "c" || e.key === "C")) { e.preventDefault(); sendMsg({ type: "input", payload: { type: "copy-request" } }); return; }
-    if (e.ctrlKey && (e.key === "v" || e.key === "V")) return; // native paste event handles it
+    if (e.ctrlKey && (e.key === "v" || e.key === "V")) return;
     e.preventDefault();
     sendKey("down", e);
   });
@@ -81,48 +73,22 @@ async function renderFrame(base64) {
     if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
       canvas.width = bmp.width;
       canvas.height = bmp.height;
-      currentFrameSize = { width: bmp.width, height: bmp.height };
     }
     ctx.drawImage(bmp, 0, 0);
     bmp.close();
     frameCount++;
     lastFrameAt = Date.now();
-    if (frameCount === 1) { console.log("[viewer] first frame", currentFrameSize); setViewStatus("live"); }
+    if (frameCount === 1) { console.log("[viewer] first frame", bmp.width, "x", bmp.height); setViewStatus("live"); }
   } catch (err) {
     console.warn("[viewer] render failed:", err.message);
   }
 }
 
-// ─── coordinate math: handles letterbox from object-fit: contain ────
+// ─── coordinate math: canvas box → CSS pixels of the page ────
 function scaleCoords(e) {
   const rect = canvas.getBoundingClientRect();
-  const boxW = rect.width;
-  const boxH = rect.height;
-
-  const imgAspect = currentFrameSize.width / currentFrameSize.height;
-  const boxAspect = boxW / boxH;
-
-  // the image is drawn *contain* (fit inside box, preserve aspect)
-  let renderW, renderH, offsetX, offsetY;
-  if (boxAspect > imgAspect) {
-    // box wider than image → vertical bars
-    renderH = boxH;
-    renderW = boxH * imgAspect;
-    offsetX = (boxW - renderW) / 2;
-    offsetY = 0;
-  } else {
-    renderW = boxW;
-    renderH = boxW / imgAspect;
-    offsetX = 0;
-    offsetY = (boxH - renderH) / 2;
-  }
-
-  const localX = e.clientX - rect.left - offsetX;
-  const localY = e.clientY - rect.top - offsetY;
-
-  const x = localX * (currentFrameSize.width / renderW);
-  const y = localY * (currentFrameSize.height / renderH);
-
+  const x = (e.clientX - rect.left) * (currentViewport.w / rect.width);
+  const y = (e.clientY - rect.top) * (currentViewport.h / rect.height);
   return { x, y };
 }
 
@@ -140,17 +106,20 @@ function sendMouse(e, action) {
     clickCount = (now - lastClickTime < 400) ? clickCount + 1 : 1;
     lastClickTime = now;
     cc = clickCount;
-  } else cc = clickCount;
+  } else {
+    cc = clickCount;
+  }
 
   const buttonName = e.button === 0 ? "left" : e.button === 1 ? "middle" : e.button === 2 ? "right" : "none";
 
-  // always send a move first so the target knows where the cursor is
+  // CDP buttons bitmask: 0 = none, 1 = left, 2 = right, 4 = middle, 8 = back, 16 = forward
+  let buttons = 0;
   if (action === "down") {
-    sendMsg({
-      type: "input", payload: {
-        type: "mouse", action: "move", x, y, button: "none", buttons: e.buttons, clickCount: 0
-      }
-    });
+    buttons = buttonName === "left" ? 1 : buttonName === "right" ? 2 : buttonName === "middle" ? 4 : 0;
+  } else if (action === "up") {
+    buttons = 0;
+  } else {
+    buttons = e.buttons;
   }
 
   sendMsg({
@@ -159,12 +128,14 @@ function sendMouse(e, action) {
       action,
       x, y,
       button: action === "move" ? "none" : buttonName,
-      buttons: e.buttons,
+      buttons,
       clickCount: cc
     }
   });
 
-  console.log(`[mouse] ${action} @ (${Math.round(x)}, ${Math.round(y)}) btn=${buttonName}`);
+  if (action !== "move") {
+    console.log(`[mouse] ${action} @ (${Math.round(x)}, ${Math.round(y)}) btn=${buttonName}`);
+  }
 }
 
 function sendKey(action, e) {
@@ -258,7 +229,8 @@ async function launch() {
     const data = await res.json();
     currentSessionId = data.sessionId;
     if (el("session-id")) el("session-id").textContent = currentSessionId;
-    frameCount = 0; lastFrameAt = 0;
+    frameCount = 0;
+    lastFrameAt = 0;
     attachCanvas();
     openSocket(currentSessionId);
     setTimeout(() => canvas && canvas.focus(), 500);
@@ -308,19 +280,39 @@ async function writeToClipboard(text) {
 function handleEvent(msg) {
   const statusEl = el("status");
   switch (msg.type) {
-    case "queued": if (statusEl) statusEl.textContent = `queued — position ${msg.position}`; break;
-    case "ping": sendMsg({ type: "pong", t: Date.now() }); break;
-    case "clipboard": writeToClipboard(msg.text); if (statusEl) statusEl.textContent = "copied"; break;
-    case "status": if (statusEl) statusEl.textContent = msg.message; break;
-    case "log": if (statusEl) statusEl.textContent = msg.message; break;
-    case "frame": renderFrame(msg.data); break;
-    case "view-ready": break;
+    case "queued":
+      if (statusEl) statusEl.textContent = `queued — position ${msg.position}`;
+      break;
+    case "ping":
+      sendMsg({ type: "pong", t: Date.now() });
+      break;
+    case "clipboard":
+      writeToClipboard(msg.text);
+      if (statusEl) statusEl.textContent = "copied";
+      break;
+    case "status":
+      if (statusEl) statusEl.textContent = msg.message;
+      break;
+    case "log":
+      if (statusEl) statusEl.textContent = msg.message;
+      break;
+    case "frame":
+      renderFrame(msg.data);
+      break;
+    case "view-ready":
+      if (msg.viewportW && msg.viewportH) {
+        currentViewport = { w: msg.viewportW, h: msg.viewportH };
+        console.log("[viewer] viewport =", currentViewport);
+      }
+      break;
     case "url": {
       const urlInput = el("nav-url");
       if (urlInput && document.activeElement !== urlInput) urlInput.value = msg.url || "";
       break;
     }
-    case "solved": if (statusEl) statusEl.textContent = "solved " + msg.count; break;
+    case "solved":
+      if (statusEl) statusEl.textContent = "solved " + msg.count;
+      break;
     case "ended":
       if (statusEl) statusEl.textContent = "ended";
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
