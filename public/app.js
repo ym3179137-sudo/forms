@@ -106,17 +106,17 @@ function sendMouse(e, action) {
   } else cc = clickCount;
 
   const buttonName = e.button === 0 ? "left" : e.button === 1 ? "middle" : e.button === 2 ? "right" : "none";
-  const buttons = action === "down" ? 1 : action === "up" ? 0 : e.buttons;
 
   sendMsg({
     type: "input", payload: {
       type: "mouse", action, x, y,
       button: action === "move" ? "none" : buttonName,
-      buttons, clickCount: cc
+      clickCount: cc
     }
   });
 
   if (action === "down") console.log(`[mouse] down @ (${Math.round(x)}, ${Math.round(y)})`);
+  if (action === "up") console.log(`[mouse] up   @ (${Math.round(x)}, ${Math.round(y)})`);
 }
 
 function sendKey(action, e) {

@@ -69,9 +69,8 @@ app.post("/api/start", async (req, res) => {
   };
   sessions.set(sessionId, entry);
 
-  try {
-    await acquire(sessionId);
-  } catch (err) {
+  try { await acquire(sessionId); }
+  catch (err) {
     sessions.delete(sessionId);
     return res.status(503).json({ error: err.message });
   }
@@ -96,7 +95,6 @@ app.post("/api/start", async (req, res) => {
     onEvent: (msg) => broadcast(sessionId, msg),
     onBrowserReady: async ({ page }) => {
       entry.page = page;
-      console.log(`[solver ${sessionId}] browser ready, attaching live view`);
       try {
         const live = await attachLiveView(page, (data) => {
           broadcast(sessionId, { type: "frame", data });
@@ -107,14 +105,13 @@ app.post("/api/start", async (req, res) => {
           w: window.innerWidth, h: window.innerHeight
         })).catch(() => ({ w: 1366, h: 768 }));
 
-        console.log(`[solver ${sessionId}] viewport ${vp.w}x${vp.h}`);
         broadcast(sessionId, { type: "view-ready", viewportW: vp.w, viewportH: vp.h });
         broadcast(sessionId, { type: "url", url: await live.currentUrl() });
 
         if (ixlCreds && ixlCreds.email && ixlCreds.password) {
           setTimeout(async () => {
             const r = await live.tryAutoLoginIxl(ixlCreds.email, ixlCreds.password);
-            if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login IXL submitted" });
+            if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login submitted" });
           }, 4000);
         }
 
@@ -128,10 +125,7 @@ app.post("/api/start", async (req, res) => {
       }
     }
   })
-    .catch(err => {
-      console.error(`[solver ${sessionId}] top-level:`, err.message);
-      broadcast(sessionId, { type: "fatal", message: err.message });
-    })
+    .catch(err => broadcast(sessionId, { type: "fatal", message: err.message }))
     .finally(async () => {
       broadcast(sessionId, { type: "ended" });
       if (entry.urlInterval) clearInterval(entry.urlInterval);
@@ -201,28 +195,6 @@ wss.on("connection", (ws, req) => {
       }
 
       await handleInput(entry.liveView.cdp, payload);
-
-      // DOM fallback on mouseup
-      if (payload.type === "mouse" && payload.action === "up") {
-        const x = Math.round(payload.x || 0);
-        const y = Math.round(payload.y || 0);
-        try {
-          await entry.liveView.cdp.send("Runtime.evaluate", {
-            expression: `(function(){
-              const el = document.elementFromPoint(${x}, ${y});
-              if (!el) return null;
-              const opts = { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, button: 0 };
-              el.dispatchEvent(new PointerEvent('pointerdown', opts));
-              el.dispatchEvent(new MouseEvent('mousedown', opts));
-              el.dispatchEvent(new PointerEvent('pointerup', opts));
-              el.dispatchEvent(new MouseEvent('mouseup', opts));
-              el.dispatchEvent(new MouseEvent('click', opts));
-              return el.tagName;
-            })()`,
-            returnByValue: true
-          });
-        } catch (_) { }
-      }
     } else if (msg.type === "nav" && entry.liveView) {
       if (msg.action === "back") await entry.liveView.goBack();
       else if (msg.action === "forward") await entry.liveView.goForward();
