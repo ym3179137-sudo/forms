@@ -111,7 +111,7 @@ app.post("/api/start", async (req, res) => {
         if (ixlCreds && ixlCreds.email && ixlCreds.password) {
           setTimeout(async () => {
             const r = await live.tryAutoLoginIxl(ixlCreds.email, ixlCreds.password);
-            if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login submitted" });
+            if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login IXL submitted" });
           }, 4000);
         }
 
@@ -183,18 +183,19 @@ wss.on("connection", (ws, req) => {
 
       if (payload.type === "copy-request") {
         try {
-          const r = await entry.liveView.cdp.send("Runtime.evaluate", {
-            expression: "navigator.clipboard.readText().catch(()=>'')",
-            awaitPromise: true, returnByValue: true
-          });
-          ws.send(JSON.stringify({ type: "clipboard", text: r?.result?.value || "" }));
+          const text = await entry.liveView.page.evaluate(() => navigator.clipboard.readText().catch(() => "")).catch(() => "");
+          ws.send(JSON.stringify({ type: "clipboard", text: text || "" }));
         } catch (_) {
           ws.send(JSON.stringify({ type: "clipboard", text: "" }));
         }
         return;
       }
 
-      await handleInput(entry.liveView.cdp, payload);
+      try {
+        await handleInput(entry.liveView.page, payload);
+      } catch (err) {
+        console.error("[input]", err.message);
+      }
     } else if (msg.type === "nav" && entry.liveView) {
       if (msg.action === "back") await entry.liveView.goBack();
       else if (msg.action === "forward") await entry.liveView.goForward();
