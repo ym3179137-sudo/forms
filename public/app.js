@@ -68,24 +68,52 @@ async function renderFrame(base64) {
     for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
     const blob = new Blob([bytes], { type: "image/jpeg" });
     const bmp = await createImageBitmap(blob);
-    if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
-      canvas.width = bmp.width;
-      canvas.height = bmp.height;
+    if (bmp.width > 0 && bmp.height > 0) {
+      if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+        canvas.width = bmp.width;
+        canvas.height = bmp.height;
+      }
+      ctx.drawImage(bmp, 0, 0);
     }
-    ctx.drawImage(bmp, 0, 0);
     bmp.close();
     frameCount++;
     lastFrameAt = Date.now();
-    if (frameCount === 1) { console.log("[viewer] first frame", bmp.width, "x", bmp.height); setViewStatus("live"); }
+    if (frameCount === 1) { console.log("[viewer] first frame", canvas.width, "x", canvas.height); setViewStatus("live"); }
   } catch (err) {
     console.warn("[viewer] render failed:", err.message);
   }
 }
 
+// ─── coordinate math: accounts for object-fit: contain letterboxing ───
 function scaleCoords(e) {
   const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) * (currentViewport.w / rect.width);
-  const y = (e.clientY - rect.top) * (currentViewport.h / rect.height);
+  const boxW = rect.width;
+  const boxH = rect.height;
+
+  const imgAspect = currentViewport.w / currentViewport.h;
+  const boxAspect = boxW / boxH;
+
+  let renderW, renderH, offsetX, offsetY;
+  if (boxAspect > imgAspect) {
+    // box is wider than image → bars on the sides
+    renderH = boxH;
+    renderW = boxH * imgAspect;
+    offsetX = (boxW - renderW) / 2;
+    offsetY = 0;
+  } else {
+    // box is taller than image → bars on top/bottom
+    renderW = boxW;
+    renderH = boxW / imgAspect;
+    offsetX = 0;
+    offsetY = (boxH - renderH) / 2;
+  }
+
+  const localX = e.clientX - rect.left - offsetX;
+  const localY = e.clientY - rect.top - offsetY;
+
+  const x = (localX / renderW) * currentViewport.w;
+  const y = (localY / renderH) * currentViewport.h;
+
   return { x, y };
 }
 
@@ -114,9 +142,6 @@ function sendMouse(e, action) {
       clickCount: cc
     }
   });
-
-  if (action === "down") console.log(`[mouse] down @ (${Math.round(x)}, ${Math.round(y)})`);
-  if (action === "up") console.log(`[mouse] up   @ (${Math.round(x)}, ${Math.round(y)})`);
 }
 
 function sendKey(action, e) {
