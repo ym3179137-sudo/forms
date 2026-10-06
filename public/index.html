@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ixl-solver</title>
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="wrap">
+        <section id="screen-login" class="screen">
+            <h1>ixl-solver</h1>
+            <p class="sub" id="boot-msg">loading keys from .env...</p>
+            <div id="error-box" class="status err" hidden></div>
+            <button id="retry-btn" type="button" hidden>Retry</button>
+        </section>
+
+        <section id="screen-session" class="screen" hidden>
+            <h1>session running</h1>
+            <p class="sub">steel browser is open. log in to ixl there. then hit Start Auto on the panel (bottom-right).
+                Ctrl+M hides it.</p>
+
+            <div class="steel-link" id="steel-link-wrap" hidden>
+                <span>steel live view:</span>
+                <a id="steel-link" target="_blank" rel="noopener"></a>
+            </div>
+
+            <div class="session-head">
+                <span class="session-id" id="session-id"></span>
+                <button id="stop-btn" type="button">Stop</button>
+            </div>
+
+            <div class="status" id="status">connecting...</div>
+            <div class="log" id="log"></div>
+
+            <button id="back-btn" class="ghost" type="button">back to launcher</button>
+        </section>
+    </div>
+    <script src="/app.js"></script>
+</body>
+
+</html>
