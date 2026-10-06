@@ -68,7 +68,6 @@ app.post("/api/start", async (req, res) => {
 
   console.log(`[solver] session ${sessionId} from user ${user}`);
 
-  // acquire a slot (queues if full)
   try {
     await acquire(sessionId);
   } catch (err) {
@@ -115,10 +114,25 @@ app.post("/api/stop/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── websocket: status ───────────────────────────────────────
+// ─── http server + upgrade router ────────────────────────────
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+const wss = new WebSocketServer({ noServer: true });
+const viewWss = new WebSocketServer({ noServer: true });
 
+server.on("upgrade", (req, socket, head) => {
+  let pathname = "/";
+  try { pathname = new URL(req.url, "http://localhost").pathname; } catch (_) { }
+
+  if (pathname === "/ws") {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  } else if (pathname === "/view") {
+    viewWss.handleUpgrade(req, socket, head, (ws) => viewWss.emit("connection", ws, req));
+  } else {
+    socket.destroy();
+  }
+});
+
+// ─── /ws: status events ──────────────────────────────────────
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, "http://localhost");
   const sessionId = url.searchParams.get("sessionId");
@@ -133,9 +147,7 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => { if (entry.ws === ws) entry.ws = null; });
 });
 
-// ─── websocket: live view ────────────────────────────────────
-const viewWss = new WebSocketServer({ server, path: "/view" });
-
+// ─── /view: live chromium stream ─────────────────────────────
 viewWss.on("connection", async (ws, req) => {
   const url = new URL(req.url, "http://localhost");
   const sessionId = url.searchParams.get("sessionId");
@@ -147,7 +159,6 @@ viewWss.on("connection", async (ws, req) => {
   const entry = sessions.get(sessionId);
   if (!entry) return ws.close(4004, "no session");
 
-  // wait up to 30s for the page to be created
   let waited = 0;
   while (!entry.page && waited < 30000) {
     await new Promise(r => setTimeout(r, 500));
