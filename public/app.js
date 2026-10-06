@@ -8,7 +8,7 @@ let username = localStorage.getItem("ixl_user") || "";
 
 let canvas = null;
 let ctx = null;
-let currentFrameSize = { width: 1280, height: 720 };
+let currentFrameSize = { width: 1366, height: 768 };
 let lastClickTime = 0;
 let clickCount = 0;
 let reconnectAttempts = 0;
@@ -45,6 +45,15 @@ function attachCanvas() {
       togglePanic();
       return;
     }
+    if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
+      e.preventDefault();
+      sendMsg({ type: "input", payload: { type: "copy-request" } });
+      return;
+    }
+    if (e.ctrlKey && (e.key === "v" || e.key === "V")) {
+      // paste handled by native paste event
+      return;
+    }
     e.preventDefault();
     sendKey("down", e);
   });
@@ -56,18 +65,13 @@ function attachCanvas() {
     if (text) sendMsg({ type: "input", payload: { type: "paste", text } });
   });
 
-  // check frame liveness every 2s — if no frame in 4s, warn
   setInterval(() => {
-    if (stopped || !currentSessionId) return;
-    if (lastFrameAt && Date.now() - lastFrameAt > 4000) {
-      setViewStatus("stalled — waiting for frames");
+    if (currentSessionId && lastFrameAt && Date.now() - lastFrameAt > 5000) {
+      setViewStatus("stalled");
     }
   }, 2000);
 }
 
-let stopped = false;
-
-// synchronous decode + draw. no onload race.
 async function renderFrame(base64) {
   if (!canvas || !ctx) return;
   try {
@@ -87,10 +91,8 @@ async function renderFrame(base64) {
     frameCount++;
     lastFrameAt = Date.now();
     if (frameCount === 1) {
-      console.log("[viewer] first frame rendered", currentFrameSize);
+      console.log("[viewer] first frame", currentFrameSize);
       setViewStatus("live");
-    } else if (frameCount === 30) {
-      setViewStatus("live · 30 frames");
     }
   } catch (err) {
     console.warn("[viewer] render failed:", err.message);
@@ -155,6 +157,7 @@ function toggleFullscreen() {
   setTimeout(() => canvas && canvas.focus(), 200);
 }
 
+// ─── auth ────────────────────────────────────────────────────
 async function tryLogin(u, p) {
   const res = await fetch("/api/login", {
     method: "POST",
@@ -164,6 +167,32 @@ async function tryLogin(u, p) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "login failed");
   return data;
+}
+
+async function loadIxlCreds() {
+  try {
+    const res = await fetch("/api/ixl-creds", { headers: { "X-IXL-Token": token } });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (el("ixl-email")) el("ixl-email").value = data.email || "";
+    if (el("ixl-pass")) el("ixl-pass").value = data.password || "";
+  } catch (_) { }
+}
+
+async function saveIxlCreds() {
+  const email = el("ixl-email")?.value.trim() || "";
+  const password = el("ixl-pass")?.value || "";
+  try {
+    const res = await fetch("/api/ixl-creds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-IXL-Token": token },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      if (el("error-box")) { el("error-box").hidden = false; el("error-box").textContent = "IXL login saved."; }
+    }
+  } catch (_) { }
 }
 
 async function launch() {
@@ -177,7 +206,6 @@ async function launch() {
       headers: { "Content-Type": "application/json", "X-IXL-Token": token },
       body: JSON.stringify({})
     });
-
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "failed" }));
       if (res.status === 401) {
@@ -189,12 +217,10 @@ async function launch() {
       }
       throw new Error(err.error || res.statusText);
     }
-
     const data = await res.json();
     currentSessionId = data.sessionId;
     if (el("session-id")) el("session-id").textContent = currentSessionId;
-    frameCount = 0;
-    lastFrameAt = 0;
+    frameCount = 0; lastFrameAt = 0;
     attachCanvas();
     openSocket(currentSessionId);
     setTimeout(() => canvas && canvas.focus(), 500);
@@ -220,7 +246,6 @@ function openSocket(sessionId) {
   socket.addEventListener("open", () => {
     reconnectAttempts = 0;
     if (el("status")) el("status").textContent = "connected";
-    console.log("[ws] connected");
   });
 
   socket.addEventListener("message", (ev) => {
@@ -228,7 +253,7 @@ function openSocket(sessionId) {
     handleEvent(msg);
   });
 
-  socket.addEventListener("close", (ev) => {
+  socket.addEventListener("close", () => {
     if (el("status")) el("status").textContent = "reconnecting…";
     if (currentSessionId && reconnectAttempts < 30) {
       reconnectAttempts++;
@@ -236,6 +261,10 @@ function openSocket(sessionId) {
       reconnectTimer = setTimeout(() => openSocket(currentSessionId), delay);
     }
   });
+}
+
+async function writeToClipboard(text) {
+  try { await navigator.clipboard.writeText(text || ""); } catch (_) { }
 }
 
 function handleEvent(msg) {
@@ -247,14 +276,20 @@ function handleEvent(msg) {
     case "ping":
       sendMsg({ type: "pong", t: Date.now() });
       break;
+    case "clipboard":
+      writeToClipboard(msg.text);
+      if (statusEl) statusEl.textContent = "copied";
+      break;
     case "status":
+      if (statusEl) statusEl.textContent = msg.message;
+      break;
+    case "log":
       if (statusEl) statusEl.textContent = msg.message;
       break;
     case "frame":
       renderFrame(msg.data);
       break;
     case "view-ready":
-      console.log("[ws] view-ready", msg.width, "x", msg.height);
       break;
     case "url": {
       const urlInput = el("nav-url");
@@ -271,6 +306,7 @@ function handleEvent(msg) {
   }
 }
 
+// ─── buttons ─────────────────────────────────────────────────
 on("login-submit", "click", async () => {
   const u = el("user-input") ? el("user-input").value.trim() : "";
   const p = el("pass-input") ? el("pass-input").value : "";
@@ -283,6 +319,8 @@ on("login-submit", "click", async () => {
     username = data.username;
     localStorage.setItem("ixl_token", token);
     localStorage.setItem("ixl_user", username);
+    if (el("ixl-box")) el("ixl-box").hidden = false;
+    await loadIxlCreds();
     launch();
   } catch (err) {
     if (el("error-box")) { el("error-box").hidden = false; el("error-box").textContent = err.message; }
@@ -294,13 +332,21 @@ on("pass-input", "keydown", (e) => {
   if (e.key === "Enter") el("login-submit")?.click();
 });
 
+on("ixl-save", "click", saveIxlCreds);
+
+on("ixl-login-btn", "click", async () => {
+  const email = el("ixl-email")?.value.trim() || "";
+  const password = el("ixl-pass")?.value || "";
+  if (!email || !password) return;
+  sendMsg({ type: "auto-login", email, password });
+});
+
 on("stop-btn", "click", async () => {
   if (!currentSessionId) return;
   await fetch("/api/stop/" + currentSessionId, { method: "POST", headers: { "X-IXL-Token": token } });
 });
 
 on("back-btn", "click", () => {
-  stopped = true;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (socket) { socket.close(); socket = null; }
   currentSessionId = null;

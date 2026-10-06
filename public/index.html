@@ -28,6 +28,20 @@
                 <button id="login-submit" type="button">Sign in</button>
             </div>
 
+            <div id="ixl-box" hidden>
+                <div class="divider"></div>
+                <p class="sub small">Save your IXL login — auto-fills when you open a session.</p>
+                <label>
+                    IXL email / username
+                    <input type="text" id="ixl-email" autocomplete="off" />
+                </label>
+                <label>
+                    IXL password
+                    <input type="password" id="ixl-pass" autocomplete="off" />
+                </label>
+                <button id="ixl-save" type="button">Save IXL login</button>
+            </div>
+
             <div id="error-box" class="err" hidden></div>
         </div>
     </div>
@@ -45,6 +59,7 @@
                 <input class="tb-url" id="nav-url" type="text" placeholder="www.ixl.com" spellcheck="false" />
             </div>
             <div class="tb-right">
+                <button class="tb-btn" id="ixl-login-btn" title="Auto-login IXL">🔑</button>
                 <button class="tb-btn" id="fs-btn" title="Fullscreen (Ctrl+M)">⛶</button>
                 <button class="tb-btn danger" id="stop-btn" title="Stop session">■</button>
                 <button class="tb-btn" id="back-btn" title="Exit">✕</button>
@@ -52,7 +67,7 @@
         </div>
 
         <div class="viewport" id="viewer-wrap">
-            <canvas id="viewer" width="1280" height="720"></canvas>
+            <canvas id="viewer" width="1366" height="768"></canvas>
             <div class="panic-overlay" id="panic-overlay" hidden>
                 <div class="panic-inner">
                     <div class="panic-title">Google Classroom</div>

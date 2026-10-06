@@ -14,7 +14,6 @@ body {
     overflow: hidden;
 }
 
-/* ─── login ─────────────────────────────────────────────── */
 .login-wrap {
     display: flex;
     align-items: center;
@@ -47,13 +46,20 @@ h1 {
     line-height: 1.5;
 }
 
-#login-box {
+.sub.small {
+    margin: 8px 0 10px 0;
+    font-size: 11px;
+}
+
+#login-box,
+#ixl-box {
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
-#login-box label {
+#login-box label,
+#ixl-box label {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -61,7 +67,8 @@ h1 {
     color: #99a;
 }
 
-#login-box input {
+#login-box input,
+#ixl-box input {
     background: #121722;
     border: 1px solid #232a3a;
     color: #d8dde8;
@@ -72,11 +79,13 @@ h1 {
     outline: none;
 }
 
-#login-box input:focus {
+#login-box input:focus,
+#ixl-box input:focus {
     border-color: #3a6fff;
 }
 
-#login-box button {
+#login-box button,
+#ixl-box button {
     background: linear-gradient(180deg, #2a6eff, #1d54d6);
     color: #fff;
     border: none;
@@ -89,8 +98,15 @@ h1 {
     margin-top: 6px;
 }
 
-#login-box button:hover {
+#login-box button:hover,
+#ixl-box button:hover {
     filter: brightness(1.1);
+}
+
+.divider {
+    height: 1px;
+    background: #232a3a;
+    margin: 16px 0;
 }
 
 .err {
@@ -103,7 +119,6 @@ h1 {
     margin-top: 12px;
 }
 
-/* ─── browser ───────────────────────────────────────────── */
 .browser {
     display: flex;
     flex-direction: column;
@@ -122,11 +137,7 @@ h1 {
     height: 44px;
 }
 
-.tb-nav {
-    display: flex;
-    gap: 4px;
-}
-
+.tb-nav,
 .tb-right {
     display: flex;
     gap: 4px;
@@ -144,7 +155,6 @@ h1 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.12s;
 }
 
 .tb-btn:hover {
@@ -192,7 +202,6 @@ h1 {
     padding: 0;
 }
 
-/* ─── viewport ──────────────────────────────────────────── */
 .viewport {
     flex: 1;
     background: #000;
@@ -215,7 +224,6 @@ h1 {
     background: #000;
 }
 
-/* ─── panic overlay (ctrl+M) ────────────────────────────── */
 .panic-overlay {
     position: absolute;
     inset: 0;
@@ -253,7 +261,6 @@ h1 {
     width: 40%;
 }
 
-/* ─── status bar ────────────────────────────────────────── */
 .statusbar {
     display: flex;
     justify-content: space-between;
