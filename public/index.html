@@ -33,21 +33,17 @@
         </section>
 
         <section id="screen-session" class="screen" hidden>
-            <h1>session running</h1>
-            <p class="sub">the browser window is running on the server. log into ixl there. then hit Start Auto on the
-                panel.</p>
-
-            <div class="steel-link" id="steel-link-wrap" hidden>
-                <span>live view:</span>
-                <a id="steel-link" target="_blank" rel="noopener"></a>
-            </div>
-
             <div class="session-head">
                 <span class="session-id" id="session-id"></span>
+                <span class="view-status" id="viewer-status">connecting…</span>
                 <button id="stop-btn" type="button">Stop</button>
             </div>
 
-            <div class="status" id="status">connecting...</div>
+            <div id="viewer-wrap">
+                <canvas id="viewer" width="1366" height="768"></canvas>
+            </div>
+
+            <div class="status" id="status">connecting…</div>
             <div class="log" id="log"></div>
 
             <button id="back-btn" class="ghost" type="button">back to launcher</button>
@@ -55,7 +51,7 @@
 
     </div>
 
-    <script src="/app.js"></script>
+    <script type="module" src="/app.js"></script>
 </body>
 
 </html>

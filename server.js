@@ -6,7 +6,10 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import { fileURLToPath } from "url";
 import { runSolver } from "./main.js";
-import { acquire, release, getStatus, queuePosition } from "./lib/session-pool.js";
+import { acquire, release, getStatus } from "./lib/session-pool.js";
+import { login, verify } from "./lib/auth.js";
+import { attachLiveView } from "./lib/live-view.js";
+import { handleInput } from "./lib/input-relay.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
@@ -16,13 +19,11 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 // ─── login auth ──────────────────────────────────────────────
-import { login, verify } from "./lib/auth.js";
-
 const OPEN_PATHS = new Set(["/api/health", "/api/login"]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
-  if (req.method === "GET" && !req.path.startsWith("/api/")) return next(); // static files
-  if (req.path === "/") return next(); // landing page
+  if (req.method === "GET" && !req.path.startsWith("/api/")) return next();
+  if (req.path === "/") return next();
 
   const token = req.headers["x-ixl-token"] || req.query.token;
   const payload = verify(token);
@@ -53,15 +54,21 @@ function broadcast(sessionId, msg) {
 
 app.post("/api/start", async (req, res) => {
   const sessionId = "sess_" + Math.random().toString(36).slice(2, 10);
+  const user = req.ixlUser || "unknown";
   const entry = {
     ws: null,
     stop: false,
     startedAt: Date.now(),
-    released: false
+    released: false,
+    page: null,
+    liveView: null,
+    user
   };
   sessions.set(sessionId, entry);
 
-  // try to acquire a slot (queues if full)
+  console.log(`[solver] session ${sessionId} from user ${user}`);
+
+  // acquire a slot (queues if full)
   try {
     await acquire(sessionId);
   } catch (err) {
@@ -69,7 +76,6 @@ app.post("/api/start", async (req, res) => {
     return res.status(503).json({ error: "queue timeout — try again shortly" });
   }
 
-  // respond immediately — the client already has a sessionId
   res.json({ sessionId });
 
   const sessionConfig = JSON.parse(JSON.stringify(config));
@@ -84,7 +90,12 @@ app.post("/api/start", async (req, res) => {
     },
     startUrl: process.env.IXL_URL || "https://www.ixl.com/",
     shouldStop: () => sessions.get(sessionId)?.stop === true,
-    onEvent: (msg) => broadcast(sessionId, msg)
+    onEvent: (msg) => broadcast(sessionId, msg),
+    onBrowserReady: ({ page }) => {
+      entry.page = page;
+      console.log(`[solver ${sessionId}] browser ready, page stored`);
+      broadcast(sessionId, { type: "log", message: "browser window live — clicks go through the view above" });
+    }
   })
     .catch(err => broadcast(sessionId, { type: "fatal", message: err.message }))
     .finally(() => {
@@ -104,21 +115,84 @@ app.post("/api/stop/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── websocket ───────────────────────────────────────────────
+// ─── websocket: status ───────────────────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, "http://localhost");
   const sessionId = url.searchParams.get("sessionId");
-  if (!sessionId) return ws.close();
+  const token = url.searchParams.get("token");
+
+  if (!sessionId || !verify(token)) return ws.close(4001, "auth");
   const entry = sessions.get(sessionId);
-  if (!entry) return ws.close();
+  if (!entry) return ws.close(4004, "no session");
+
   entry.ws = ws;
   ws.send(JSON.stringify({ type: "hello", sessionId }));
   ws.on("close", () => { if (entry.ws === ws) entry.ws = null; });
 });
 
+// ─── websocket: live view ────────────────────────────────────
+const viewWss = new WebSocketServer({ server, path: "/view" });
+
+viewWss.on("connection", async (ws, req) => {
+  const url = new URL(req.url, "http://localhost");
+  const sessionId = url.searchParams.get("sessionId");
+  const token = url.searchParams.get("token");
+
+  const payload = verify(token);
+  if (!payload) return ws.close(4001, "auth");
+
+  const entry = sessions.get(sessionId);
+  if (!entry) return ws.close(4004, "no session");
+
+  // wait up to 30s for the page to be created
+  let waited = 0;
+  while (!entry.page && waited < 30000) {
+    await new Promise(r => setTimeout(r, 500));
+    waited += 500;
+    if (ws.readyState !== 1) return;
+  }
+  if (!entry.page) {
+    try { ws.send(JSON.stringify({ type: "error", message: "browser never started" })); } catch (_) { }
+    return ws.close();
+  }
+
+  let live = null;
+  try {
+    live = await attachLiveView(entry.page, (data) => {
+      if (ws.readyState !== 1) return;
+      try { ws.send(JSON.stringify({ type: "frame", data })); } catch (_) { }
+    });
+
+    const dims = await entry.page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight
+    })).catch(() => ({ width: 1366, height: 768 }));
+
+    ws.send(JSON.stringify({ type: "meta", width: dims.width, height: dims.height }));
+    entry.liveView = live;
+
+    ws.on("message", async (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
+      await handleInput(live.cdp, msg);
+    });
+
+    ws.on("close", async () => {
+      try { await live.stop(); } catch (_) { }
+      entry.liveView = null;
+    });
+
+    console.log(`[view ${sessionId}] attached`);
+  } catch (err) {
+    console.error("[view] failed:", err.message);
+    try { ws.close(); } catch (_) { }
+  }
+});
+
+// ─── listen ──────────────────────────────────────────────────
 const port = process.env.PORT || config.server.port;
 const host = process.env.PORT ? "0.0.0.0" : config.server.host;
 

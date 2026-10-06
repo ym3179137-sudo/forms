@@ -9,7 +9,7 @@ import { injectPanel, updatePanel, getAutoState } from "./lib/ui.js";
 import { lookupAnswer, saveAnswer, recordWrongAnswer, stats } from "./lib/answer-cache.js";
 import { readFeedback, dismissWrongFeedback, parseCorrectAnswerText, captureSignature } from "./lib/ixl-feedback.js";
 
-export async function runSolver({ sessionId, config, creds, startUrl, shouldStop, onEvent }) {
+export async function runSolver({ sessionId, config, creds, startUrl, shouldStop, onEvent, onBrowserReady }) {
     const emit = (msg) => {
         if (onEvent) onEvent({ sessionId, ...msg });
         console.log(`[solver ${sessionId}]`, msg.type, "-", msg.message || "");
@@ -18,6 +18,11 @@ export async function runSolver({ sessionId, config, creds, startUrl, shouldStop
     emit({ type: "status", message: "launching local browser..." });
     const { page, liveViewUrl, sessionId: steelSessionId } = await createSession();
     emit({ type: "status", message: "browser ready", liveViewUrl, steelSessionId });
+
+    // hand the page object to the server so it can attach a live view
+    if (onBrowserReady) {
+        try { onBrowserReady({ page }); } catch (e) { console.warn("[solver] onBrowserReady failed:", e.message); }
+    }
 
     await hardenPage(page);
 
