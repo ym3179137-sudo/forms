@@ -1,3 +1,45 @@
+#login-box {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+#login-box label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 11px;
+    color: #99a;
+}
+
+#login-box input {
+    background: #121722;
+    border: 1px solid #232a3a;
+    color: #d8dde8;
+    padding: 11px 13px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+    outline: none;
+}
+
+#login-box input:focus {
+    border-color: #3a6fff;
+}
+
+#login-box button {
+    background: linear-gradient(180deg, #2a6eff, #1d54d6);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 11px;
+    font-weight: 600;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+
 * {
     box-sizing: border-box;
 }

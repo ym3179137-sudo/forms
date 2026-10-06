@@ -12,11 +12,22 @@
     <div class="wrap">
         <section id="screen-login" class="screen">
             <h1>ixl-solver</h1>
-            <p class="sub" id="boot-msg">loading keys from .env...</p>
-            <div id="error-box" class="status err" hidden></div>
-            <button id="retry-btn" type="button" hidden>Retry</button>
-        </section>
+            <p class="sub" id="boot-msg">sign in to continue.</p>
 
+            <div id="login-box">
+                <label>
+                    username
+                    <input type="text" id="user-input" autocomplete="username" />
+                </label>
+                <label>
+                    password
+                    <input type="password" id="pass-input" autocomplete="current-password" />
+                </label>
+                <button id="login-submit" type="button">Sign in</button>
+            </div>
+
+            <div id="error-box" class="status err" hidden></div>
+        </section>
         <section id="screen-session" class="screen" hidden>
             <h1>session running</h1>
             <p class="sub">steel browser is open. log in to ixl there. then hit Start Auto on the panel (bottom-right).

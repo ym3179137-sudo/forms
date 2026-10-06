@@ -15,20 +15,28 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─── basic auth ──────────────────────────────────────────────
-const BASIC_USER = process.env.BASIC_USER || "admin";
-const BASIC_PASS = process.env.BASIC_PASS || "changeme";
+// ─── login auth ──────────────────────────────────────────────
+import { login, verify } from "./lib/auth.js";
 
+const OPEN_PATHS = new Set(["/api/health", "/api/login"]);
 app.use((req, res, next) => {
-  if (req.path === "/api/health") return next();
-  const auth = req.headers.authorization || "";
-  const [scheme, encoded] = auth.split(" ");
-  if (scheme === "Basic" && encoded) {
-    const [u, p] = Buffer.from(encoded, "base64").toString().split(":");
-    if (u === BASIC_USER && p === BASIC_PASS) return next();
-  }
-  res.set("WWW-Authenticate", 'Basic realm="ixl-solver"');
-  return res.status(401).send("auth required");
+  if (OPEN_PATHS.has(req.path)) return next();
+  if (req.method === "GET" && !req.path.startsWith("/api/")) return next(); // static files
+  if (req.path === "/") return next(); // landing page
+
+  const token = req.headers["x-ixl-token"] || req.query.token;
+  const payload = verify(token);
+  if (!payload) return res.status(401).json({ error: "not logged in" });
+  req.ixlUser = payload.u;
+  next();
+});
+
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const token = login(username, password);
+  if (!token) return res.status(401).json({ error: "invalid username or password" });
+  console.log(`[auth] ${username} logged in`);
+  res.json({ token, username });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
