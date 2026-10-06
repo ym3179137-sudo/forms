@@ -4,14 +4,13 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ixl-solver</title>
+    <title>IXL — Chrome</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body>
 
-    <!-- ─── login screen ───────────────────────────────────────── -->
     <div class="login-wrap" id="screen-login">
         <div class="login-card">
             <h1>ixl-solver</h1>
@@ -33,29 +32,43 @@
         </div>
     </div>
 
-    <!-- ─── browser screen ─────────────────────────────────────── -->
     <div class="browser" id="screen-session" hidden>
 
         <div class="toolbar">
-            <button class="tb-btn" id="nav-back" title="Back">◀</button>
-            <button class="tb-btn" id="nav-forward" title="Forward">▶</button>
-            <button class="tb-btn" id="nav-reload" title="Reload">⟳</button>
-            <input class="tb-url" id="nav-url" type="text" placeholder="https://www.ixl.com/" spellcheck="false" />
-            <button class="tb-btn" id="nav-go" title="Go">→</button>
-            <div class="tb-spacer"></div>
-            <span class="view-status" id="viewer-status">connecting…</span>
-            <button class="tb-btn danger" id="stop-btn" title="Stop">Stop</button>
-            <button class="tb-btn" id="fs-btn" title="Fullscreen">⛶</button>
-            <button class="tb-btn" id="back-btn" title="Exit">✕</button>
+            <div class="tb-nav">
+                <button class="tb-btn" id="nav-back" title="Back">←</button>
+                <button class="tb-btn" id="nav-forward" title="Forward">→</button>
+                <button class="tb-btn" id="nav-reload" title="Reload">⟳</button>
+            </div>
+            <div class="tb-address">
+                <span class="tb-lock">🔒</span>
+                <input class="tb-url" id="nav-url" type="text" placeholder="www.ixl.com" spellcheck="false" />
+            </div>
+            <div class="tb-right">
+                <button class="tb-btn" id="fs-btn" title="Fullscreen (Ctrl+M)">⛶</button>
+                <button class="tb-btn danger" id="stop-btn" title="Stop session">■</button>
+                <button class="tb-btn" id="back-btn" title="Exit">✕</button>
+            </div>
         </div>
 
         <div class="viewport" id="viewer-wrap">
-            <canvas id="viewer" width="1920" height="1080"></canvas>
+            <canvas id="viewer" width="1280" height="720"></canvas>
+            <div class="panic-overlay" id="panic-overlay" hidden>
+                <div class="panic-inner">
+                    <div class="panic-title">Google Classroom</div>
+                    <div class="panic-line"></div>
+                    <div class="panic-line short"></div>
+                    <div class="panic-line"></div>
+                    <div class="panic-line shorter"></div>
+                    <div class="panic-line"></div>
+                </div>
+            </div>
         </div>
 
         <div class="statusbar">
             <span id="session-id"></span>
             <span class="sess-status" id="status">connecting…</span>
+            <span class="view-status" id="viewer-status">connecting…</span>
         </div>
 
     </div>

@@ -18,7 +18,6 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─── auth ────────────────────────────────────────────────────
 const OPEN_PATHS = new Set(["/api/health", "/api/login"]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
@@ -43,7 +42,6 @@ app.post("/api/login", (req, res) => {
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 app.get("/api/status", (req, res) => res.json(getStatus()));
 
-// ─── sessions ────────────────────────────────────────────────
 const sessions = new Map();
 
 function broadcast(sessionId, msg) {
@@ -56,13 +54,8 @@ app.post("/api/start", async (req, res) => {
   const sessionId = "sess_" + Math.random().toString(36).slice(2, 10);
   const user = req.ixlUser || "unknown";
   const entry = {
-    ws: null,
-    stop: false,
-    startedAt: Date.now(),
-    released: false,
-    page: null,
-    liveView: null,
-    user
+    ws: null, stop: false, startedAt: Date.now(), released: false,
+    page: null, liveView: null, user, pingInterval: null
   };
   sessions.set(sessionId, entry);
 
@@ -73,7 +66,7 @@ app.post("/api/start", async (req, res) => {
     return res.status(503).json({ error: "queue timeout — try again shortly" });
   }
 
-  console.log(`[solver] session ${sessionId} from user ${user}`);
+  console.log(`[solver] session ${sessionId} for ${user}`);
   res.json({ sessionId });
 
   const sessionConfig = JSON.parse(JSON.stringify(config));
@@ -87,11 +80,11 @@ app.post("/api/start", async (req, res) => {
       groqKey: process.env.GROQ_API_KEY
     },
     startUrl: process.env.IXL_URL || "https://www.ixl.com/",
+    username: user,
     shouldStop: () => sessions.get(sessionId)?.stop === true,
     onEvent: (msg) => broadcast(sessionId, msg),
     onBrowserReady: async ({ page }) => {
       entry.page = page;
-      console.log(`[solver ${sessionId}] browser ready, attaching live view`);
       try {
         const live = await attachLiveView(page, (data) => {
           broadcast(sessionId, { type: "frame", data });
@@ -101,20 +94,17 @@ app.post("/api/start", async (req, res) => {
         const dims = await page.evaluate(() => ({
           width: window.innerWidth,
           height: window.innerHeight
-        })).catch(() => ({ width: 1920, height: 1080 }));
+        })).catch(() => ({ width: 1280, height: 720 }));
 
         broadcast(sessionId, { type: "view-ready", width: dims.width, height: dims.height });
         broadcast(sessionId, { type: "url", url: await live.currentUrl() });
 
-        // broadcast url every 2s so the toolbar stays in sync
         const urlInterval = setInterval(async () => {
           if (!entry.liveView) return clearInterval(urlInterval);
           const u = await entry.liveView.currentUrl();
           broadcast(sessionId, { type: "url", url: u });
-        }, 2000);
+        }, 2500);
         entry.urlInterval = urlInterval;
-
-        console.log(`[solver ${sessionId}] live view attached`);
       } catch (err) {
         console.error(`[solver ${sessionId}] live view failed:`, err.message);
       }
@@ -124,13 +114,9 @@ app.post("/api/start", async (req, res) => {
     .finally(async () => {
       broadcast(sessionId, { type: "ended" });
       if (entry.urlInterval) clearInterval(entry.urlInterval);
-      if (entry.liveView) {
-        try { await entry.liveView.stop(); } catch (_) { }
-      }
-      if (!entry.released) {
-        entry.released = true;
-        release(sessionId);
-      }
+      if (entry.pingInterval) clearInterval(entry.pingInterval);
+      if (entry.liveView) { try { await entry.liveView.stop(); } catch (_) { } }
+      if (!entry.released) { entry.released = true; release(sessionId); }
       setTimeout(() => sessions.delete(sessionId), 60000);
     });
 });
@@ -142,7 +128,6 @@ app.post("/api/stop/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── http + ws ───────────────────────────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
@@ -168,6 +153,16 @@ wss.on("connection", (ws, req) => {
   entry.ws = ws;
   ws.send(JSON.stringify({ type: "hello", sessionId }));
 
+  // keep-alive ping every 15s so railway doesn't kill idle ws
+  if (entry.pingInterval) clearInterval(entry.pingInterval);
+  entry.pingInterval = setInterval(() => {
+    if (ws.readyState === 1) {
+      try { ws.send(JSON.stringify({ type: "ping", t: Date.now() })); } catch (_) { }
+    } else {
+      clearInterval(entry.pingInterval);
+    }
+  }, 15000);
+
   ws.on("message", async (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
@@ -182,13 +177,17 @@ wss.on("connection", (ws, req) => {
       else if (msg.action === "resize") await entry.liveView.resize(msg.width, msg.height);
       const u = await entry.liveView.currentUrl();
       broadcast(sessionId, { type: "url", url: u });
+    } else if (msg.type === "pong") {
+      // fine
     }
   });
 
-  ws.on("close", () => { if (entry.ws === ws) entry.ws = null; });
+  ws.on("close", () => {
+    if (entry.ws === ws) entry.ws = null;
+    if (entry.pingInterval) clearInterval(entry.pingInterval);
+  });
 });
 
-// ─── listen ──────────────────────────────────────────────────
 const port = process.env.PORT || config.server.port;
 const host = process.env.PORT ? "0.0.0.0" : config.server.host;
 

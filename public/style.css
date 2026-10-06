@@ -8,13 +8,13 @@ body {
     padding: 0;
     background: #0c0f17;
     color: #d8dde8;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 14px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
     height: 100%;
     overflow: hidden;
 }
 
-/* ─── login ───────────────────────────────────────────────── */
+/* ─── login ─────────────────────────────────────────────── */
 .login-wrap {
     display: flex;
     align-items: center;
@@ -37,6 +37,7 @@ h1 {
     font-size: 22px;
     color: #8ab4ff;
     letter-spacing: 0.5px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
 .sub {
@@ -102,7 +103,7 @@ h1 {
     margin-top: 12px;
 }
 
-/* ─── browser chrome ─────────────────────────────────────── */
+/* ─── browser ───────────────────────────────────────────── */
 .browser {
     display: flex;
     flex-direction: column;
@@ -113,84 +114,99 @@ h1 {
 .toolbar {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     padding: 8px 10px;
-    background: #161a24;
-    border-bottom: 1px solid #232a3a;
+    background: #202124;
+    border-bottom: 1px solid #000;
     flex-shrink: 0;
+    height: 44px;
+}
+
+.tb-nav {
+    display: flex;
+    gap: 4px;
+}
+
+.tb-right {
+    display: flex;
+    gap: 4px;
 }
 
 .tb-btn {
-    background: #1f2531;
-    border: 1px solid #2a3140;
-    color: #d8dde8;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-family: inherit;
-    font-size: 13px;
+    background: transparent;
+    border: none;
+    color: #e8eaed;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
     cursor: pointer;
-    line-height: 1;
-    min-width: 30px;
-    height: 30px;
+    font-size: 15px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    transition: background 0.12s;
 }
 
 .tb-btn:hover {
-    background: #2a3140;
+    background: #303134;
 }
 
 .tb-btn.danger {
-    background: #3a1e1e;
-    border-color: #5a2a2a;
-    color: #ff9090;
+    color: #ff6666;
 }
 
 .tb-btn.danger:hover {
-    background: #5a2a2a;
+    background: #3a1e1e;
+}
+
+.tb-address {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #292a2d;
+    border-radius: 20px;
+    padding: 0 12px;
+    height: 34px;
+    border: 1px solid #3c4043;
+}
+
+.tb-address:focus-within {
+    border-color: #8ab4ff;
+    background: #1f2023;
+}
+
+.tb-lock {
+    font-size: 11px;
+    opacity: 0.7;
 }
 
 .tb-url {
     flex: 1;
-    background: #0c0f17;
-    border: 1px solid #232a3a;
-    color: #d8dde8;
-    padding: 6px 12px;
-    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: #e8eaed;
     font-family: inherit;
     font-size: 13px;
-    height: 30px;
     outline: none;
+    padding: 0;
 }
 
-.tb-url:focus {
-    border-color: #3a6fff;
-}
-
-.tb-spacer {
-    flex: 0;
-}
-
-.view-status {
-    color: #8ab4ff;
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background: #121722;
-    margin-right: 4px;
-}
-
-/* ─── viewport ───────────────────────────────────────────── */
+/* ─── viewport ──────────────────────────────────────────── */
 .viewport {
     flex: 1;
     background: #000;
     overflow: hidden;
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 #viewer {
     display: block;
+    max-width: 100%;
+    max-height: 100%;
     width: 100%;
     height: 100%;
     object-fit: contain;
@@ -199,28 +215,62 @@ h1 {
     background: #000;
 }
 
-/* ─── status bar ─────────────────────────────────────────── */
+/* ─── panic overlay (ctrl+M) ────────────────────────────── */
+.panic-overlay {
+    position: absolute;
+    inset: 0;
+    background: #ffffff;
+    color: #202124;
+    padding: 40px 60px;
+    overflow: auto;
+    z-index: 100;
+}
+
+.panic-inner {
+    max-width: 720px;
+}
+
+.panic-title {
+    font-family: "Product Sans", Roboto, sans-serif;
+    font-size: 28px;
+    font-weight: 500;
+    margin-bottom: 24px;
+}
+
+.panic-line {
+    height: 14px;
+    background: #e8eaed;
+    border-radius: 4px;
+    margin-bottom: 14px;
+    width: 100%;
+}
+
+.panic-line.short {
+    width: 60%;
+}
+
+.panic-line.shorter {
+    width: 40%;
+}
+
+/* ─── status bar ────────────────────────────────────────── */
 .statusbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 5px 12px;
-    background: #0e121b;
-    border-top: 1px solid #1c2330;
+    background: #202124;
+    border-top: 1px solid #000;
     font-size: 11px;
-    color: #778;
+    color: #9aa0a6;
     flex-shrink: 0;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
 .statusbar .sess-status {
     color: #8ab4ff;
 }
 
-/* ─── fullscreen ─────────────────────────────────────────── */
-:fullscreen .toolbar {
-    background: #10141e;
-}
-
-:fullscreen .viewport {
-    background: #000;
+.view-status {
+    color: #8ab4ff;
 }
