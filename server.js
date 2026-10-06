@@ -18,13 +18,11 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─── login auth ──────────────────────────────────────────────
 const OPEN_PATHS = new Set(["/api/health", "/api/login"]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
   if (req.method === "GET" && !req.path.startsWith("/api/")) return next();
   if (req.path === "/") return next();
-
   const token = req.headers["x-ixl-token"] || req.query.token;
   const payload = verify(token);
   if (!payload) return res.status(401).json({ error: "not logged in" });
@@ -36,14 +34,12 @@ app.post("/api/login", (req, res) => {
   const { username, password } = req.body || {};
   const token = login(username, password);
   if (!token) return res.status(401).json({ error: "invalid username or password" });
-  console.log(`[auth] ${username} logged in`);
   res.json({ token, username });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 app.get("/api/status", (req, res) => res.json(getStatus()));
 
-// ─── ixl creds ───────────────────────────────────────────────
 app.get("/api/ixl-creds", async (req, res) => {
   const creds = await getIxlCreds(req.ixlUser);
   if (!creds) return res.json({ email: "", password: "", has: false });
@@ -56,7 +52,6 @@ app.post("/api/ixl-creds", async (req, res) => {
   res.json({ ok });
 });
 
-// ─── sessions ────────────────────────────────────────────────
 const sessions = new Map();
 
 function broadcast(sessionId, msg) {
@@ -80,7 +75,6 @@ app.post("/api/start", async (req, res) => {
     return res.status(503).json({ error: "queue timeout — try again shortly" });
   }
 
-  console.log(`[solver] session ${sessionId} for ${user}`);
   res.json({ sessionId });
 
   const sessionConfig = JSON.parse(JSON.stringify(config));
@@ -111,7 +105,6 @@ app.post("/api/start", async (req, res) => {
           h: window.innerHeight
         })).catch(() => ({ w: 1366, h: 768 }));
 
-        console.log(`[solver ${sessionId}] viewport = ${vp.w}x${vp.h}`);
         broadcast(sessionId, { type: "view-ready", viewportW: vp.w, viewportH: vp.h });
         broadcast(sessionId, { type: "url", url: await live.currentUrl() });
 
@@ -119,7 +112,6 @@ app.post("/api/start", async (req, res) => {
           setTimeout(async () => {
             const r = await live.tryAutoLoginIxl(ixlCreds.email, ixlCreds.password);
             if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login IXL: submitted" });
-            else broadcast(sessionId, { type: "log", message: "auto-login skipped: " + (r.reason || "") });
           }, 4000);
         }
 
@@ -151,7 +143,6 @@ app.post("/api/stop/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── ws ──────────────────────────────────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
@@ -169,7 +160,6 @@ wss.on("connection", (ws, req) => {
   const url = new URL(req.url, "http://localhost");
   const sessionId = url.searchParams.get("sessionId");
   const token = url.searchParams.get("token");
-
   if (!sessionId || !verify(token)) return ws.close(4001, "auth");
   const entry = sessions.get(sessionId);
   if (!entry) return ws.close(4004, "no session");
@@ -181,9 +171,7 @@ wss.on("connection", (ws, req) => {
   entry.pingInterval = setInterval(() => {
     if (ws.readyState === 1) {
       try { ws.send(JSON.stringify({ type: "ping", t: Date.now() })); } catch (_) { }
-    } else {
-      clearInterval(entry.pingInterval);
-    }
+    } else clearInterval(entry.pingInterval);
   }, 15000);
 
   ws.on("message", async (raw) => {
@@ -195,21 +183,52 @@ wss.on("connection", (ws, req) => {
 
       if (payload.type === "copy-request") {
         try {
-          const cdp = entry.liveView.cdp;
-          if (!cdp) throw new Error("no cdp");
-          const r = await cdp.send("Runtime.evaluate", {
+          const r = await entry.liveView.cdp.send("Runtime.evaluate", {
             expression: "navigator.clipboard.readText().catch(()=>'')",
-            awaitPromise: true,
-            returnByValue: true
+            awaitPromise: true, returnByValue: true
           });
-          const text = r?.result?.value || "";
-          ws.send(JSON.stringify({ type: "clipboard", text }));
+          ws.send(JSON.stringify({ type: "clipboard", text: r?.result?.value || "" }));
         } catch (_) {
           ws.send(JSON.stringify({ type: "clipboard", text: "" }));
         }
         return;
       }
+
+      // 1) CDP native input (pointer + mouse)
       await handleInput(entry.liveView.cdp, payload);
+
+      // 2) DOM-level fallback click for presses — fires element.click() on whatever
+      //    is under the pointer, so React's onclick handlers fire even if pointer events are weird.
+      if (payload.type === "mouse" && payload.action === "up") {
+        const x = Math.round(payload.x || 0);
+        const y = Math.round(payload.y || 0);
+        try {
+          await entry.liveView.cdp.send("Runtime.evaluate", {
+            expression: `(function(){
+              const x=${x}, y=${y};
+              const el = document.elementFromPoint(x, y);
+              if (!el) return 'no el';
+              // walk up to find a clickable ancestor
+              let node = el, depth = 0;
+              const clickable = n => n && (n.onclick || n.getAttribute('role') === 'button' || n.tagName === 'BUTTON' || n.tagName === 'A' ||
+                                             (n.className && /SelectableTile|answer|choice|option/i.test(n.className)));
+              while (node && depth < 6 && !clickable(node)) { node = node.parentElement; depth++; }
+              const target = node || el;
+              const r = target.getBoundingClientRect();
+              const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+              const opts = { bubbles: true, cancelable: true, view: window,
+                             clientX: cx, clientY: cy, button: 0, buttons: 0 };
+              target.dispatchEvent(new PointerEvent('pointerdown', opts));
+              target.dispatchEvent(new MouseEvent('mousedown', opts));
+              target.dispatchEvent(new PointerEvent('pointerup', opts));
+              target.dispatchEvent(new MouseEvent('mouseup', opts));
+              target.dispatchEvent(new MouseEvent('click', opts));
+              return target.tagName + '.' + (target.className || '').slice(0, 40);
+            })()`,
+            returnByValue: true
+          });
+        } catch (_) { }
+      }
     } else if (msg.type === "nav" && entry.liveView) {
       if (msg.action === "back") await entry.liveView.goBack();
       else if (msg.action === "forward") await entry.liveView.goForward();
@@ -231,7 +250,6 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-// ─── listen ──────────────────────────────────────────────────
 const port = process.env.PORT || config.server.port;
 const host = process.env.PORT ? "0.0.0.0" : config.server.host;
 server.listen(port, host, () => {

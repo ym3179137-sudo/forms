@@ -21,7 +21,6 @@ function setViewStatus(s) {
   if (v) v.textContent = s;
 }
 
-// ─── canvas ──────────────────────────────────────────────────
 function attachCanvas() {
   if (canvas) return;
   canvas = el("viewer");
@@ -60,7 +59,6 @@ function attachCanvas() {
   }, 2000);
 }
 
-// ─── frame render ────────────────────────────────────────────
 async function renderFrame(base64) {
   if (!canvas || !ctx) return;
   try {
@@ -84,7 +82,6 @@ async function renderFrame(base64) {
   }
 }
 
-// ─── coordinate math: canvas box → CSS pixels of the page ────
 function scaleCoords(e) {
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (currentViewport.w / rect.width);
@@ -106,36 +103,20 @@ function sendMouse(e, action) {
     clickCount = (now - lastClickTime < 400) ? clickCount + 1 : 1;
     lastClickTime = now;
     cc = clickCount;
-  } else {
-    cc = clickCount;
-  }
+  } else cc = clickCount;
 
   const buttonName = e.button === 0 ? "left" : e.button === 1 ? "middle" : e.button === 2 ? "right" : "none";
-
-  // CDP buttons bitmask: 0 = none, 1 = left, 2 = right, 4 = middle, 8 = back, 16 = forward
-  let buttons = 0;
-  if (action === "down") {
-    buttons = buttonName === "left" ? 1 : buttonName === "right" ? 2 : buttonName === "middle" ? 4 : 0;
-  } else if (action === "up") {
-    buttons = 0;
-  } else {
-    buttons = e.buttons;
-  }
+  const buttons = action === "down" ? 1 : action === "up" ? 0 : e.buttons;
 
   sendMsg({
     type: "input", payload: {
-      type: "mouse",
-      action,
-      x, y,
+      type: "mouse", action, x, y,
       button: action === "move" ? "none" : buttonName,
-      buttons,
-      clickCount: cc
+      buttons, clickCount: cc
     }
   });
 
-  if (action !== "move") {
-    console.log(`[mouse] ${action} @ (${Math.round(x)}, ${Math.round(y)}) btn=${buttonName}`);
-  }
+  if (action === "down") console.log(`[mouse] down @ (${Math.round(x)}, ${Math.round(y)})`);
 }
 
 function sendKey(action, e) {
@@ -165,7 +146,6 @@ function toggleFullscreen() {
   setTimeout(() => canvas && canvas.focus(), 200);
 }
 
-// ─── auth ────────────────────────────────────────────────────
 async function tryLogin(u, p) {
   const res = await fetch("/api/login", {
     method: "POST",
@@ -229,8 +209,7 @@ async function launch() {
     const data = await res.json();
     currentSessionId = data.sessionId;
     if (el("session-id")) el("session-id").textContent = currentSessionId;
-    frameCount = 0;
-    lastFrameAt = 0;
+    frameCount = 0; lastFrameAt = 0;
     attachCanvas();
     openSocket(currentSessionId);
     setTimeout(() => canvas && canvas.focus(), 500);
@@ -280,25 +259,12 @@ async function writeToClipboard(text) {
 function handleEvent(msg) {
   const statusEl = el("status");
   switch (msg.type) {
-    case "queued":
-      if (statusEl) statusEl.textContent = `queued — position ${msg.position}`;
-      break;
-    case "ping":
-      sendMsg({ type: "pong", t: Date.now() });
-      break;
-    case "clipboard":
-      writeToClipboard(msg.text);
-      if (statusEl) statusEl.textContent = "copied";
-      break;
-    case "status":
-      if (statusEl) statusEl.textContent = msg.message;
-      break;
-    case "log":
-      if (statusEl) statusEl.textContent = msg.message;
-      break;
-    case "frame":
-      renderFrame(msg.data);
-      break;
+    case "queued": if (statusEl) statusEl.textContent = `queued — position ${msg.position}`; break;
+    case "ping": sendMsg({ type: "pong", t: Date.now() }); break;
+    case "clipboard": writeToClipboard(msg.text); if (statusEl) statusEl.textContent = "copied"; break;
+    case "status": if (statusEl) statusEl.textContent = msg.message; break;
+    case "log": if (statusEl) statusEl.textContent = msg.message; break;
+    case "frame": renderFrame(msg.data); break;
     case "view-ready":
       if (msg.viewportW && msg.viewportH) {
         currentViewport = { w: msg.viewportW, h: msg.viewportH };
@@ -310,9 +276,7 @@ function handleEvent(msg) {
       if (urlInput && document.activeElement !== urlInput) urlInput.value = msg.url || "";
       break;
     }
-    case "solved":
-      if (statusEl) statusEl.textContent = "solved " + msg.count;
-      break;
+    case "solved": if (statusEl) statusEl.textContent = "solved " + msg.count; break;
     case "ended":
       if (statusEl) statusEl.textContent = "ended";
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -320,7 +284,6 @@ function handleEvent(msg) {
   }
 }
 
-// ─── buttons ─────────────────────────────────────────────────
 on("login-submit", "click", async () => {
   const u = el("user-input") ? el("user-input").value.trim() : "";
   const p = el("pass-input") ? el("pass-input").value : "";
@@ -344,19 +307,16 @@ on("login-submit", "click", async () => {
 
 on("pass-input", "keydown", (e) => { if (e.key === "Enter") el("login-submit")?.click(); });
 on("ixl-save", "click", saveIxlCreds);
-
 on("ixl-login-btn", "click", () => {
   const email = el("ixl-email")?.value.trim() || "";
   const password = el("ixl-pass")?.value || "";
   if (!email || !password) return;
   sendMsg({ type: "auto-login", email, password });
 });
-
 on("stop-btn", "click", async () => {
   if (!currentSessionId) return;
   await fetch("/api/stop/" + currentSessionId, { method: "POST", headers: { "X-IXL-Token": token } });
 });
-
 on("back-btn", "click", () => {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (socket) { socket.close(); socket = null; }
@@ -364,7 +324,6 @@ on("back-btn", "click", () => {
   if (el("screen-session")) el("screen-session").hidden = true;
   if (el("screen-login")) el("screen-login").hidden = false;
 });
-
 on("nav-back", "click", () => sendMsg({ type: "nav", action: "back" }));
 on("nav-forward", "click", () => sendMsg({ type: "nav", action: "forward" }));
 on("nav-reload", "click", () => sendMsg({ type: "nav", action: "reload" }));
