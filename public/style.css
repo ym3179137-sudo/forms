@@ -207,19 +207,19 @@ h1 {
     background: #000;
     overflow: hidden;
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
 #viewer {
-    display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: fill;
+    object-position: top left;
     cursor: default;
     outline: none;
     background: #000;
+    image-rendering: auto;
 }
 
 .panic-overlay {

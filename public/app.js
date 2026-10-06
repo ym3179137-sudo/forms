@@ -59,6 +59,7 @@ function attachCanvas() {
   }, 2000);
 }
 
+// ─── frame render — sets viewport from actual bitmap size ───
 async function renderFrame(base64) {
   if (!canvas || !ctx) return;
   try {
@@ -73,18 +74,24 @@ async function renderFrame(base64) {
         canvas.width = bmp.width;
         canvas.height = bmp.height;
       }
+      // the drawn pixel size IS what Input.dispatchMouseEvent expects
+      currentViewport = { w: bmp.width, h: bmp.height };
       ctx.drawImage(bmp, 0, 0);
     }
     bmp.close();
     frameCount++;
     lastFrameAt = Date.now();
-    if (frameCount === 1) { console.log("[viewer] first frame", canvas.width, "x", canvas.height); setViewStatus("live"); }
+    if (frameCount === 1) {
+      console.log("[viewer] first frame", canvas.width, "x", canvas.height);
+      setViewStatus("live");
+    }
   } catch (err) {
     console.warn("[viewer] render failed:", err.message);
   }
 }
 
-// with object-fit: fill, the canvas box IS the image box. simple 1:1 scale.
+// with object-fit: fill, canvas is stretched to its CSS box.
+// scale mouse box-coords → frame-pixel coords using currentViewport.
 function scaleCoords(e) {
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (currentViewport.w / rect.width);
@@ -269,10 +276,8 @@ function handleEvent(msg) {
     case "log": if (statusEl) statusEl.textContent = msg.message; break;
     case "frame": renderFrame(msg.data); break;
     case "view-ready":
-      if (msg.viewportW && msg.viewportH) {
-        currentViewport = { w: msg.viewportW, h: msg.viewportH };
-        console.log("[viewer] viewport =", currentViewport);
-      }
+      // server reported the CSS viewport of chromium.
+      // we override with the actual bitmap dims as soon as the first frame arrives.
       break;
     case "url": {
       const urlInput = el("nav-url");
