@@ -13,19 +13,19 @@ let lastClickTime = 0;
 let clickCount = 0;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
-const imageCache = new Image();
+let frameCount = 0;
+let lastFrameAt = 0;
 
 function setViewStatus(s) {
   const v = el("viewer-status");
   if (v) v.textContent = s;
 }
 
-// ─── canvas ──────────────────────────────────────────────────
 function attachCanvas() {
   if (canvas) return;
   canvas = el("viewer");
   if (!canvas) return;
-  ctx = canvas.getContext("2d");
+  ctx = canvas.getContext("2d", { alpha: false });
   canvas.tabIndex = 0;
 
   canvas.addEventListener("mousedown", (e) => { canvas.focus(); sendMouse(e, "down"); e.preventDefault(); });
@@ -40,7 +40,6 @@ function attachCanvas() {
   }, { passive: false });
 
   canvas.addEventListener("keydown", (e) => {
-    // panic / fullscreen toggle
     if (e.ctrlKey && (e.key === "m" || e.key === "M")) {
       e.preventDefault(); e.stopPropagation();
       togglePanic();
@@ -56,19 +55,46 @@ function attachCanvas() {
     const text = (e.clipboardData || window.clipboardData).getData("text");
     if (text) sendMsg({ type: "input", payload: { type: "paste", text } });
   });
+
+  // check frame liveness every 2s — if no frame in 4s, warn
+  setInterval(() => {
+    if (stopped || !currentSessionId) return;
+    if (lastFrameAt && Date.now() - lastFrameAt > 4000) {
+      setViewStatus("stalled — waiting for frames");
+    }
+  }, 2000);
 }
 
-function renderFrame(base64) {
+let stopped = false;
+
+// synchronous decode + draw. no onload race.
+async function renderFrame(base64) {
   if (!canvas || !ctx) return;
-  imageCache.onload = () => {
-    if (canvas.width !== imageCache.width || canvas.height !== imageCache.height) {
-      canvas.width = imageCache.width;
-      canvas.height = imageCache.height;
-      currentFrameSize = { width: imageCache.width, height: imageCache.height };
+  try {
+    const bin = atob(base64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: "image/jpeg" });
+    const bmp = await createImageBitmap(blob);
+    if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      currentFrameSize = { width: bmp.width, height: bmp.height };
     }
-    ctx.drawImage(imageCache, 0, 0);
-  };
-  imageCache.src = "data:image/jpeg;base64," + base64;
+    ctx.drawImage(bmp, 0, 0);
+    bmp.close();
+    frameCount++;
+    lastFrameAt = Date.now();
+    if (frameCount === 1) {
+      console.log("[viewer] first frame rendered", currentFrameSize);
+      setViewStatus("live");
+    } else if (frameCount === 30) {
+      setViewStatus("live · 30 frames");
+    }
+  } catch (err) {
+    console.warn("[viewer] render failed:", err.message);
+  }
 }
 
 function scaleCoords(e) {
@@ -114,7 +140,6 @@ function sendKey(action, e) {
   });
 }
 
-// ─── panic mode (ctrl+M) ─────────────────────────────────────
 let panicActive = false;
 function togglePanic() {
   panicActive = !panicActive;
@@ -123,7 +148,6 @@ function togglePanic() {
   if (!panicActive) setTimeout(() => canvas && canvas.focus(), 100);
 }
 
-// ─── fullscreen ──────────────────────────────────────────────
 function toggleFullscreen() {
   const target = el("viewer-wrap") || document.documentElement;
   if (!document.fullscreenElement) target.requestFullscreen().catch(() => { });
@@ -131,7 +155,6 @@ function toggleFullscreen() {
   setTimeout(() => canvas && canvas.focus(), 200);
 }
 
-// ─── auth ────────────────────────────────────────────────────
 async function tryLogin(u, p) {
   const res = await fetch("/api/login", {
     method: "POST",
@@ -162,7 +185,6 @@ async function launch() {
         token = "";
         if (el("screen-session")) el("screen-session").hidden = true;
         if (el("screen-login")) el("screen-login").hidden = false;
-        if (el("login-box")) el("login-box").hidden = false;
         return;
       }
       throw new Error(err.error || res.statusText);
@@ -171,6 +193,8 @@ async function launch() {
     const data = await res.json();
     currentSessionId = data.sessionId;
     if (el("session-id")) el("session-id").textContent = currentSessionId;
+    frameCount = 0;
+    lastFrameAt = 0;
     attachCanvas();
     openSocket(currentSessionId);
     setTimeout(() => canvas && canvas.focus(), 500);
@@ -184,7 +208,6 @@ async function launch() {
   }
 }
 
-// ─── websocket with reconnect ────────────────────────────────
 function openSocket(sessionId) {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (socket) { try { socket.close(); } catch (_) { } }
@@ -197,7 +220,7 @@ function openSocket(sessionId) {
   socket.addEventListener("open", () => {
     reconnectAttempts = 0;
     if (el("status")) el("status").textContent = "connected";
-    setViewStatus("live");
+    console.log("[ws] connected");
   });
 
   socket.addEventListener("message", (ev) => {
@@ -207,16 +230,12 @@ function openSocket(sessionId) {
 
   socket.addEventListener("close", (ev) => {
     if (el("status")) el("status").textContent = "reconnecting…";
-    setViewStatus("reconnecting…");
-    // silent auto-reconnect
     if (currentSessionId && reconnectAttempts < 30) {
       reconnectAttempts++;
       const delay = Math.min(1000 + reconnectAttempts * 500, 5000);
       reconnectTimer = setTimeout(() => openSocket(currentSessionId), delay);
     }
   });
-
-  socket.addEventListener("error", () => { });
 }
 
 function handleEvent(msg) {
@@ -225,20 +244,17 @@ function handleEvent(msg) {
     case "queued":
       if (statusEl) statusEl.textContent = `queued — position ${msg.position}`;
       break;
-    case "hello": break;
     case "ping":
       sendMsg({ type: "pong", t: Date.now() });
       break;
     case "status":
       if (statusEl) statusEl.textContent = msg.message;
       break;
-    case "log": break;
     case "frame":
       renderFrame(msg.data);
-      setViewStatus("live");
       break;
     case "view-ready":
-      setViewStatus("live");
+      console.log("[ws] view-ready", msg.width, "x", msg.height);
       break;
     case "url": {
       const urlInput = el("nav-url");
@@ -248,7 +264,6 @@ function handleEvent(msg) {
     case "solved":
       if (statusEl) statusEl.textContent = "solved " + msg.count;
       break;
-    case "fatal":
     case "ended":
       if (statusEl) statusEl.textContent = "ended";
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -256,7 +271,6 @@ function handleEvent(msg) {
   }
 }
 
-// ─── button bindings ─────────────────────────────────────────
 on("login-submit", "click", async () => {
   const u = el("user-input") ? el("user-input").value.trim() : "";
   const p = el("pass-input") ? el("pass-input").value : "";
@@ -286,12 +300,12 @@ on("stop-btn", "click", async () => {
 });
 
 on("back-btn", "click", () => {
+  stopped = true;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (socket) { socket.close(); socket = null; }
   currentSessionId = null;
   if (el("screen-session")) el("screen-session").hidden = true;
   if (el("screen-login")) el("screen-login").hidden = false;
-  if (el("login-box")) el("login-box").hidden = false;
 });
 
 on("nav-back", "click", () => sendMsg({ type: "nav", action: "back" }));
@@ -306,7 +320,6 @@ on("nav-url", "keydown", (e) => {
 });
 on("fs-btn", "click", toggleFullscreen);
 
-// global Ctrl+M works even if canvas isn't focused
 window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && (e.key === "m" || e.key === "M")) {
     e.preventDefault(); e.stopPropagation();
@@ -314,7 +327,6 @@ window.addEventListener("keydown", (e) => {
   }
 }, true);
 
-// ─── boot: no auto-launch, always show login first ───────────
 window.addEventListener("DOMContentLoaded", () => {
   if (el("screen-login")) el("screen-login").hidden = false;
   if (el("screen-session")) el("screen-session").hidden = true;
