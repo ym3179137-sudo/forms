@@ -84,36 +84,11 @@ async function renderFrame(base64) {
   }
 }
 
-// ─── coordinate math: accounts for object-fit: contain letterboxing ───
+// with object-fit: fill, the canvas box IS the image box. simple 1:1 scale.
 function scaleCoords(e) {
   const rect = canvas.getBoundingClientRect();
-  const boxW = rect.width;
-  const boxH = rect.height;
-
-  const imgAspect = currentViewport.w / currentViewport.h;
-  const boxAspect = boxW / boxH;
-
-  let renderW, renderH, offsetX, offsetY;
-  if (boxAspect > imgAspect) {
-    // box is wider than image → bars on the sides
-    renderH = boxH;
-    renderW = boxH * imgAspect;
-    offsetX = (boxW - renderW) / 2;
-    offsetY = 0;
-  } else {
-    // box is taller than image → bars on top/bottom
-    renderW = boxW;
-    renderH = boxW / imgAspect;
-    offsetX = 0;
-    offsetY = (boxH - renderH) / 2;
-  }
-
-  const localX = e.clientX - rect.left - offsetX;
-  const localY = e.clientY - rect.top - offsetY;
-
-  const x = (localX / renderW) * currentViewport.w;
-  const y = (localY / renderH) * currentViewport.h;
-
+  const x = (e.clientX - rect.left) * (currentViewport.w / rect.width);
+  const y = (e.clientY - rect.top) * (currentViewport.h / rect.height);
   return { x, y };
 }
 
@@ -134,14 +109,17 @@ function sendMouse(e, action) {
   } else cc = clickCount;
 
   const buttonName = e.button === 0 ? "left" : e.button === 1 ? "middle" : e.button === 2 ? "right" : "none";
+  const buttons = action === "down" ? 1 : action === "up" ? 0 : e.buttons;
 
   sendMsg({
     type: "input", payload: {
       type: "mouse", action, x, y,
       button: action === "move" ? "none" : buttonName,
-      clickCount: cc
+      buttons, clickCount: cc
     }
   });
+
+  if (action === "down") console.log(`[mouse] down @ (${Math.round(x)}, ${Math.round(y)})`);
 }
 
 function sendKey(action, e) {
