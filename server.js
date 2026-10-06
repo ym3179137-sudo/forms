@@ -122,6 +122,7 @@ const viewWss = new WebSocketServer({ noServer: true });
 server.on("upgrade", (req, socket, head) => {
   let pathname = "/";
   try { pathname = new URL(req.url, "http://localhost").pathname; } catch (_) { }
+  console.log(`[upgrade] path=${pathname}`);
 
   if (pathname === "/ws") {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
@@ -138,10 +139,17 @@ wss.on("connection", (ws, req) => {
   const sessionId = url.searchParams.get("sessionId");
   const token = url.searchParams.get("token");
 
-  if (!sessionId || !verify(token)) return ws.close(4001, "auth");
+  if (!sessionId || !verify(token)) {
+    console.warn(`[ws] auth fail for ${sessionId}`);
+    return ws.close(4001, "auth");
+  }
   const entry = sessions.get(sessionId);
-  if (!entry) return ws.close(4004, "no session");
+  if (!entry) {
+    console.warn(`[ws] no session ${sessionId}`);
+    return ws.close(4004, "no session");
+  }
 
+  console.log(`[ws ${sessionId}] connected`);
   entry.ws = ws;
   ws.send(JSON.stringify({ type: "hello", sessionId }));
   ws.on("close", () => { if (entry.ws === ws) entry.ws = null; });
@@ -153,12 +161,21 @@ viewWss.on("connection", async (ws, req) => {
   const sessionId = url.searchParams.get("sessionId");
   const token = url.searchParams.get("token");
 
+  console.log(`[view] incoming connection for ${sessionId} (token len ${(token || "").length})`);
+
   const payload = verify(token);
-  if (!payload) return ws.close(4001, "auth");
+  if (!payload) {
+    console.warn(`[view ${sessionId}] auth failed`);
+    return ws.close(4001, "auth");
+  }
 
   const entry = sessions.get(sessionId);
-  if (!entry) return ws.close(4004, "no session");
+  if (!entry) {
+    console.warn(`[view ${sessionId}] no session`);
+    return ws.close(4004, "no session");
+  }
 
+  console.log(`[view ${sessionId}] waiting for page...`);
   let waited = 0;
   while (!entry.page && waited < 30000) {
     await new Promise(r => setTimeout(r, 500));
@@ -166,9 +183,12 @@ viewWss.on("connection", async (ws, req) => {
     if (ws.readyState !== 1) return;
   }
   if (!entry.page) {
+    console.warn(`[view ${sessionId}] timeout waiting for page`);
     try { ws.send(JSON.stringify({ type: "error", message: "browser never started" })); } catch (_) { }
     return ws.close();
   }
+
+  console.log(`[view ${sessionId}] page found, attaching CDP...`);
 
   let live = null;
   try {
@@ -194,11 +214,12 @@ viewWss.on("connection", async (ws, req) => {
     ws.on("close", async () => {
       try { await live.stop(); } catch (_) { }
       entry.liveView = null;
+      console.log(`[view ${sessionId}] disconnected`);
     });
 
-    console.log(`[view ${sessionId}] attached`);
+    console.log(`[view ${sessionId}] attached — streaming`);
   } catch (err) {
-    console.error("[view] failed:", err.message);
+    console.error(`[view ${sessionId}] failed:`, err.message);
     try { ws.close(); } catch (_) { }
   }
 });
