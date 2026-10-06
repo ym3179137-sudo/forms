@@ -1,91 +1,163 @@
-const loginScreen = document.getElementById("screen-login");
-const sessionScreen = document.getElementById("screen-session");
-const bootMsg = document.getElementById("boot-msg");
-const errorBox = document.getElementById("error-box");
-const retryBtn = document.getElementById("retry-btn");
-const statusEl = document.getElementById("status");
-const logEl = document.getElementById("log");
-const sessionIdEl = document.getElementById("session-id");
-const stopBtn = document.getElementById("stop-btn");
-const backBtn = document.getElementById("back-btn");
-const steelLinkWrap = document.getElementById("steel-link-wrap");
-const steelLink = document.getElementById("steel-link");
+function el(id) { return document.getElementById(id); }
+function on(id, evt, fn) {
+  const e = el(id);
+  if (e) e.addEventListener(evt, fn);
+  return e;
+}
+
+const loginScreen = el("screen-login");
+const sessionScreen = el("screen-session");
+const bootMsg = el("boot-msg");
+const errorBox = el("error-box");
+const statusEl = el("status");
+const logEl = el("log");
+const sessionIdEl = el("session-id");
+const steelLinkWrap = el("steel-link-wrap");
+const steelLink = el("steel-link");
+const userInput = el("user-input");
+const passInput = el("pass-input");
+const loginBox = el("login-box");
 
 let socket = null;
 let currentSessionId = null;
+let token = localStorage.getItem("ixl_token") || "";
+let username = localStorage.getItem("ixl_user") || "";
+
+async function tryLogin(u, p) {
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: u, password: p })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "login failed");
+  return data;
+}
 
 async function launch() {
-  errorBox.hidden = true;
-  retryBtn.hidden = true;
-  bootMsg.textContent = "launching steel session with .env keys...";
-  logEl.innerHTML = "";
-  statusEl.textContent = "launching...";
-  sessionScreen.hidden = false;
-  loginScreen.hidden = true;
-  steelLinkWrap.hidden = true;
+  if (errorBox) errorBox.hidden = true;
+  if (bootMsg) bootMsg.textContent = "launching browser session...";
+  if (logEl) logEl.innerHTML = "";
+  if (statusEl) statusEl.textContent = "queued...";
+  if (sessionScreen) sessionScreen.hidden = false;
+  if (loginScreen) loginScreen.hidden = true;
+  if (steelLinkWrap) steelLinkWrap.hidden = true;
 
   try {
     const res = await fetch("/api/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-IXL-Token": token
+      },
       body: JSON.stringify({})
     });
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "failed" }));
+      if (res.status === 401) {
+        localStorage.removeItem("ixl_token");
+        token = "";
+        if (sessionScreen) sessionScreen.hidden = true;
+        if (loginScreen) loginScreen.hidden = false;
+        if (loginBox) loginBox.hidden = false;
+        if (bootMsg) bootMsg.textContent = "session expired. sign in again.";
+        return;
+      }
       throw new Error(err.error || res.statusText);
     }
+
     const data = await res.json();
     currentSessionId = data.sessionId;
-    sessionIdEl.textContent = currentSessionId;
+    if (sessionIdEl) sessionIdEl.textContent = currentSessionId;
     openSocket(currentSessionId);
   } catch (err) {
-    sessionScreen.hidden = true;
-    loginScreen.hidden = false;
-    bootMsg.textContent = "launch failed.";
-    errorBox.hidden = false;
-    errorBox.textContent = "error: " + err.message;
-    retryBtn.hidden = false;
+    if (sessionScreen) sessionScreen.hidden = true;
+    if (loginScreen) loginScreen.hidden = false;
+    if (errorBox) {
+      errorBox.hidden = false;
+      errorBox.textContent = "error: " + err.message;
+    }
   }
 }
 
-retryBtn.addEventListener("click", launch);
+on("login-submit", "click", async () => {
+  const u = userInput ? userInput.value.trim() : "";
+  const p = passInput ? passInput.value : "";
+  if (!u || !p) return;
 
-stopBtn.addEventListener("click", async () => {
-  if (!currentSessionId) return;
-  await fetch("/api/stop/" + currentSessionId, { method: "POST" });
-  statusEl.textContent = "stopping...";
+  if (errorBox) errorBox.hidden = true;
+  if (bootMsg) bootMsg.textContent = "signing in...";
+
+  try {
+    const data = await tryLogin(u, p);
+    token = data.token;
+    username = data.username;
+    localStorage.setItem("ixl_token", token);
+    localStorage.setItem("ixl_user", username);
+    if (loginBox) loginBox.hidden = true;
+    launch();
+  } catch (err) {
+    if (errorBox) {
+      errorBox.hidden = false;
+      errorBox.textContent = err.message;
+    }
+    if (bootMsg) bootMsg.textContent = "sign in to continue.";
+  }
 });
 
-backBtn.addEventListener("click", () => {
+on("pass-input", "keydown", (e) => {
+  if (e.key === "Enter") {
+    const b = el("login-submit");
+    if (b) b.click();
+  }
+});
+
+on("stop-btn", "click", async () => {
+  if (!currentSessionId) return;
+  await fetch("/api/stop/" + currentSessionId, {
+    method: "POST",
+    headers: { "X-IXL-Token": token }
+  });
+  if (statusEl) statusEl.textContent = "stopping...";
+});
+
+on("back-btn", "click", () => {
   if (socket) { socket.close(); socket = null; }
   currentSessionId = null;
-  sessionScreen.hidden = true;
-  loginScreen.hidden = false;
-  bootMsg.textContent = "idle. hit retry to launch again.";
-  retryBtn.hidden = false;
+  if (sessionScreen) sessionScreen.hidden = true;
+  if (loginScreen) loginScreen.hidden = false;
+  if (loginBox) loginBox.hidden = false;
+  if (bootMsg) bootMsg.textContent = "signed in as " + username + ".";
 });
 
 function openSocket(sessionId) {
   if (socket) socket.close();
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  socket = new WebSocket(proto + "://" + location.host + "/ws?sessionId=" + sessionId);
-  socket.addEventListener("open", () => { statusEl.textContent = "connected"; });
+  socket = new WebSocket(
+    proto + "://" + location.host + "/ws?sessionId=" + sessionId + "&token=" + encodeURIComponent(token)
+  );
+  socket.addEventListener("open", () => { if (statusEl) statusEl.textContent = "connected"; });
   socket.addEventListener("message", (ev) => {
     let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
     handleEvent(msg);
   });
-  socket.addEventListener("close", () => { statusEl.textContent = "disconnected"; });
+  socket.addEventListener("close", () => { if (statusEl) statusEl.textContent = "disconnected"; });
 }
 
 function handleEvent(msg) {
   switch (msg.type) {
+    case "queued":
+      if (statusEl) statusEl.textContent = `queued — position ${msg.position}`;
+      appendLog(`waiting for a slot (position ${msg.position})`, "status");
+      break;
     case "hello":
       appendLog("connected to " + msg.sessionId, "status");
       break;
     case "status":
-      statusEl.textContent = msg.message;
+      if (statusEl) statusEl.textContent = msg.message;
       appendLog(msg.message, "status");
-      if (msg.liveViewUrl) {
+      if (msg.liveViewUrl && steelLinkWrap && steelLink) {
         steelLinkWrap.hidden = false;
         steelLink.href = msg.liveViewUrl;
         steelLink.textContent = msg.liveViewUrl;
@@ -96,23 +168,24 @@ function handleEvent(msg) {
       break;
     case "solved":
       appendLog("+ " + msg.message, "solved");
-      statusEl.textContent = "solved " + msg.count;
+      if (statusEl) statusEl.textContent = "solved " + msg.count;
       break;
     case "error":
       appendLog("x " + msg.message, "err");
       break;
     case "fatal":
       appendLog("fatal: " + msg.message, "err");
-      statusEl.textContent = "session ended";
+      if (statusEl) statusEl.textContent = "session ended";
       break;
     case "ended":
       appendLog("session ended", "status");
-      statusEl.textContent = "ended";
+      if (statusEl) statusEl.textContent = "ended";
       break;
   }
 }
 
 function appendLog(text, cls) {
+  if (!logEl) return;
   const div = document.createElement("div");
   if (cls) div.className = cls;
   div.textContent = text;
@@ -120,4 +193,11 @@ function appendLog(text, cls) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-window.addEventListener("DOMContentLoaded", launch);
+window.addEventListener("DOMContentLoaded", () => {
+  if (token) {
+    if (loginBox) loginBox.hidden = true;
+    launch();
+  } else {
+    if (loginBox) loginBox.hidden = false;
+  }
+});
