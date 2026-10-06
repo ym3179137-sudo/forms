@@ -49,6 +49,7 @@ const sessions = new Map();
 function broadcast(sessionId, msg) {
   const entry = sessions.get(sessionId);
   if (!entry || !entry.ws) return;
+  if (entry.ws.readyState !== 1) return;
   try { entry.ws.send(JSON.stringify(msg)); } catch (_) { }
 }
 
@@ -90,15 +91,33 @@ app.post("/api/start", async (req, res) => {
     startUrl: process.env.IXL_URL || "https://www.ixl.com/",
     shouldStop: () => sessions.get(sessionId)?.stop === true,
     onEvent: (msg) => broadcast(sessionId, msg),
-    onBrowserReady: ({ page }) => {
+    onBrowserReady: async ({ page }) => {
       entry.page = page;
-      console.log(`[solver ${sessionId}] browser ready, page stored`);
-      broadcast(sessionId, { type: "log", message: "browser window live — clicks go through the view above" });
+      console.log(`[solver ${sessionId}] browser ready, attaching live view`);
+      try {
+        const live = await attachLiveView(page, (data) => {
+          broadcast(sessionId, { type: "frame", data });
+        });
+        entry.liveView = live;
+
+        const dims = await page.evaluate(() => ({
+          width: window.innerWidth,
+          height: window.innerHeight
+        })).catch(() => ({ width: 1366, height: 768 }));
+
+        console.log(`[solver ${sessionId}] live view attached ${dims.width}x${dims.height}`);
+        broadcast(sessionId, { type: "view-ready", width: dims.width, height: dims.height });
+      } catch (err) {
+        console.error(`[solver ${sessionId}] live view failed:`, err.message);
+      }
     }
   })
     .catch(err => broadcast(sessionId, { type: "fatal", message: err.message }))
-    .finally(() => {
+    .finally(async () => {
       broadcast(sessionId, { type: "ended" });
+      if (entry.liveView) {
+        try { await entry.liveView.stop(); } catch (_) { }
+      }
       if (!entry.released) {
         entry.released = true;
         release(sessionId);
@@ -114,33 +133,27 @@ app.post("/api/stop/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── http server + upgrade router ────────────────────────────
+// ─── http server + single websocket ──────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
-const viewWss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
   let pathname = "/";
   try { pathname = new URL(req.url, "http://localhost").pathname; } catch (_) { }
-  console.log(`[upgrade] path=${pathname}`);
-
   if (pathname === "/ws") {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-  } else if (pathname === "/view") {
-    viewWss.handleUpgrade(req, socket, head, (ws) => viewWss.emit("connection", ws, req));
   } else {
     socket.destroy();
   }
 });
 
-// ─── /ws: status events ──────────────────────────────────────
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, "http://localhost");
   const sessionId = url.searchParams.get("sessionId");
   const token = url.searchParams.get("token");
 
   if (!sessionId || !verify(token)) {
-    console.warn(`[ws] auth fail for ${sessionId}`);
+    console.warn(`[ws] auth fail`);
     return ws.close(4001, "auth");
   }
   const entry = sessions.get(sessionId);
@@ -152,76 +165,19 @@ wss.on("connection", (ws, req) => {
   console.log(`[ws ${sessionId}] connected`);
   entry.ws = ws;
   ws.send(JSON.stringify({ type: "hello", sessionId }));
-  ws.on("close", () => { if (entry.ws === ws) entry.ws = null; });
-});
 
-// ─── /view: live chromium stream ─────────────────────────────
-viewWss.on("connection", async (ws, req) => {
-  const url = new URL(req.url, "http://localhost");
-  const sessionId = url.searchParams.get("sessionId");
-  const token = url.searchParams.get("token");
+  ws.on("message", async (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
+    if (msg.type === "input" && entry.liveView) {
+      await handleInput(entry.liveView.cdp, msg.payload || msg);
+    }
+  });
 
-  console.log(`[view] incoming connection for ${sessionId} (token len ${(token || "").length})`);
-
-  const payload = verify(token);
-  if (!payload) {
-    console.warn(`[view ${sessionId}] auth failed`);
-    return ws.close(4001, "auth");
-  }
-
-  const entry = sessions.get(sessionId);
-  if (!entry) {
-    console.warn(`[view ${sessionId}] no session`);
-    return ws.close(4004, "no session");
-  }
-
-  console.log(`[view ${sessionId}] waiting for page...`);
-  let waited = 0;
-  while (!entry.page && waited < 30000) {
-    await new Promise(r => setTimeout(r, 500));
-    waited += 500;
-    if (ws.readyState !== 1) return;
-  }
-  if (!entry.page) {
-    console.warn(`[view ${sessionId}] timeout waiting for page`);
-    try { ws.send(JSON.stringify({ type: "error", message: "browser never started" })); } catch (_) { }
-    return ws.close();
-  }
-
-  console.log(`[view ${sessionId}] page found, attaching CDP...`);
-
-  let live = null;
-  try {
-    live = await attachLiveView(entry.page, (data) => {
-      if (ws.readyState !== 1) return;
-      try { ws.send(JSON.stringify({ type: "frame", data })); } catch (_) { }
-    });
-
-    const dims = await entry.page.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight
-    })).catch(() => ({ width: 1366, height: 768 }));
-
-    ws.send(JSON.stringify({ type: "meta", width: dims.width, height: dims.height }));
-    entry.liveView = live;
-
-    ws.on("message", async (raw) => {
-      let msg;
-      try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
-      await handleInput(live.cdp, msg);
-    });
-
-    ws.on("close", async () => {
-      try { await live.stop(); } catch (_) { }
-      entry.liveView = null;
-      console.log(`[view ${sessionId}] disconnected`);
-    });
-
-    console.log(`[view ${sessionId}] attached — streaming`);
-  } catch (err) {
-    console.error(`[view ${sessionId}] failed:`, err.message);
-    try { ws.close(); } catch (_) { }
-  }
+  ws.on("close", () => {
+    if (entry.ws === ws) entry.ws = null;
+    console.log(`[ws ${sessionId}] disconnected`);
+  });
 });
 
 // ─── listen ──────────────────────────────────────────────────

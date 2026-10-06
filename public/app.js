@@ -1,3 +1,5 @@
+import { attachCanvas, renderFrame, setViewStatus } from "/viewer.js";
+
 function el(id) { return document.getElementById(id); }
 function on(id, evt, fn) {
   const e = el(id);
@@ -12,8 +14,6 @@ const errorBox = el("error-box");
 const statusEl = el("status");
 const logEl = el("log");
 const sessionIdEl = el("session-id");
-const steelLinkWrap = el("steel-link-wrap");
-const steelLink = el("steel-link");
 const userInput = el("user-input");
 const passInput = el("pass-input");
 const loginBox = el("login-box");
@@ -41,7 +41,7 @@ async function launch() {
   if (statusEl) statusEl.textContent = "queued...";
   if (sessionScreen) sessionScreen.hidden = false;
   if (loginScreen) loginScreen.hidden = true;
-  if (steelLinkWrap) steelLinkWrap.hidden = true;
+  setViewStatus("connecting…");
 
   try {
     const res = await fetch("/api/start", {
@@ -71,6 +71,7 @@ async function launch() {
     currentSessionId = data.sessionId;
     if (sessionIdEl) sessionIdEl.textContent = currentSessionId;
     openSocket(currentSessionId);
+    attachViewer();
   } catch (err) {
     if (sessionScreen) sessionScreen.hidden = true;
     if (loginScreen) loginScreen.hidden = false;
@@ -79,6 +80,15 @@ async function launch() {
       errorBox.textContent = "error: " + err.message;
     }
   }
+}
+
+function attachViewer() {
+  const canvas = el("viewer");
+  if (!canvas) { console.warn("[viewer] no canvas"); return; }
+  attachCanvas(canvas, (msg) => {
+    if (!socket || socket.readyState !== 1) return;
+    socket.send(JSON.stringify(msg));
+  });
 }
 
 on("login-submit", "click", async () => {
@@ -137,12 +147,19 @@ function openSocket(sessionId) {
   socket = new WebSocket(
     proto + "://" + location.host + "/ws?sessionId=" + sessionId + "&token=" + encodeURIComponent(token)
   );
-  socket.addEventListener("open", () => { if (statusEl) statusEl.textContent = "connected"; });
+  socket.addEventListener("open", () => {
+    if (statusEl) statusEl.textContent = "connected";
+    console.log("[ws] connected");
+  });
   socket.addEventListener("message", (ev) => {
     let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
     handleEvent(msg);
   });
-  socket.addEventListener("close", () => { if (statusEl) statusEl.textContent = "disconnected"; });
+  socket.addEventListener("close", (ev) => {
+    if (statusEl) statusEl.textContent = "disconnected";
+    setViewStatus("disconnected " + (ev.code || ""));
+    console.warn("[ws] closed code=", ev.code);
+  });
 }
 
 function handleEvent(msg) {
@@ -157,14 +174,16 @@ function handleEvent(msg) {
     case "status":
       if (statusEl) statusEl.textContent = msg.message;
       appendLog(msg.message, "status");
-      if (msg.liveViewUrl && steelLinkWrap && steelLink) {
-        steelLinkWrap.hidden = false;
-        steelLink.href = msg.liveViewUrl;
-        steelLink.textContent = msg.liveViewUrl;
-      }
       break;
     case "log":
       appendLog(msg.message);
+      break;
+    case "frame":
+      renderFrame(msg.data);
+      setViewStatus("live");
+      break;
+    case "view-ready":
+      setViewStatus("live");
       break;
     case "solved":
       appendLog("+ " + msg.message, "solved");
