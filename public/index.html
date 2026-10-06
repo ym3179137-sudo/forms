@@ -5,11 +5,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ixl-solver</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body>
+
     <div class="wrap">
+
         <section id="screen-login" class="screen">
             <h1>ixl-solver</h1>
             <p class="sub" id="boot-msg">sign in to continue.</p>
@@ -28,13 +31,14 @@
 
             <div id="error-box" class="status err" hidden></div>
         </section>
+
         <section id="screen-session" class="screen" hidden>
             <h1>session running</h1>
-            <p class="sub">steel browser is open. log in to ixl there. then hit Start Auto on the panel (bottom-right).
-                Ctrl+M hides it.</p>
+            <p class="sub">the browser window is running on the server. log into ixl there. then hit Start Auto on the
+                panel.</p>
 
             <div class="steel-link" id="steel-link-wrap" hidden>
-                <span>steel live view:</span>
+                <span>live view:</span>
                 <a id="steel-link" target="_blank" rel="noopener"></a>
             </div>
 
@@ -48,7 +52,9 @@
 
             <button id="back-btn" class="ghost" type="button">back to launcher</button>
         </section>
+
     </div>
+
     <script src="/app.js"></script>
 </body>
 
