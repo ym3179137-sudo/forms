@@ -17,4 +17,4 @@ COPY . .
 ENV NODE_ENV=production
 ENV DISPLAY=:99
 
-CMD xvfb-run -a --server-args="-screen 0 1366x768x24" node server.js
+CMD xvfb-run -a --server-args="-screen 0 1366x768x24 -ac +extension GLX +render -noreset" node server.js
