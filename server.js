@@ -69,16 +69,18 @@ app.post("/api/start", async (req, res) => {
   };
   sessions.set(sessionId, entry);
 
-  try { await acquire(sessionId); }
-  catch (err) {
+  try {
+    await acquire(sessionId);
+  } catch (err) {
     sessions.delete(sessionId);
-    return res.status(503).json({ error: "queue timeout — try again shortly" });
+    return res.status(503).json({ error: err.message });
   }
 
   res.json({ sessionId });
 
   const sessionConfig = JSON.parse(JSON.stringify(config));
-  const ixlCreds = await getIxlCreds(user);
+  let ixlCreds = null;
+  try { ixlCreds = await getIxlCreds(user); } catch (_) { }
 
   runSolver({
     sessionId,
@@ -94,6 +96,7 @@ app.post("/api/start", async (req, res) => {
     onEvent: (msg) => broadcast(sessionId, msg),
     onBrowserReady: async ({ page }) => {
       entry.page = page;
+      console.log(`[solver ${sessionId}] browser ready, attaching live view`);
       try {
         const live = await attachLiveView(page, (data) => {
           broadcast(sessionId, { type: "frame", data });
@@ -101,17 +104,17 @@ app.post("/api/start", async (req, res) => {
         entry.liveView = live;
 
         const vp = await page.evaluate(() => ({
-          w: window.innerWidth,
-          h: window.innerHeight
+          w: window.innerWidth, h: window.innerHeight
         })).catch(() => ({ w: 1366, h: 768 }));
 
+        console.log(`[solver ${sessionId}] viewport ${vp.w}x${vp.h}`);
         broadcast(sessionId, { type: "view-ready", viewportW: vp.w, viewportH: vp.h });
         broadcast(sessionId, { type: "url", url: await live.currentUrl() });
 
         if (ixlCreds && ixlCreds.email && ixlCreds.password) {
           setTimeout(async () => {
             const r = await live.tryAutoLoginIxl(ixlCreds.email, ixlCreds.password);
-            if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login IXL: submitted" });
+            if (r.ok) broadcast(sessionId, { type: "log", message: "auto-login IXL submitted" });
           }, 4000);
         }
 
@@ -125,7 +128,10 @@ app.post("/api/start", async (req, res) => {
       }
     }
   })
-    .catch(err => broadcast(sessionId, { type: "fatal", message: err.message }))
+    .catch(err => {
+      console.error(`[solver ${sessionId}] top-level:`, err.message);
+      broadcast(sessionId, { type: "fatal", message: err.message });
+    })
     .finally(async () => {
       broadcast(sessionId, { type: "ended" });
       if (entry.urlInterval) clearInterval(entry.urlInterval);
@@ -194,36 +200,24 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // 1) CDP native input (pointer + mouse)
       await handleInput(entry.liveView.cdp, payload);
 
-      // 2) DOM-level fallback click for presses — fires element.click() on whatever
-      //    is under the pointer, so React's onclick handlers fire even if pointer events are weird.
+      // DOM fallback on mouseup
       if (payload.type === "mouse" && payload.action === "up") {
         const x = Math.round(payload.x || 0);
         const y = Math.round(payload.y || 0);
         try {
           await entry.liveView.cdp.send("Runtime.evaluate", {
             expression: `(function(){
-              const x=${x}, y=${y};
-              const el = document.elementFromPoint(x, y);
-              if (!el) return 'no el';
-              // walk up to find a clickable ancestor
-              let node = el, depth = 0;
-              const clickable = n => n && (n.onclick || n.getAttribute('role') === 'button' || n.tagName === 'BUTTON' || n.tagName === 'A' ||
-                                             (n.className && /SelectableTile|answer|choice|option/i.test(n.className)));
-              while (node && depth < 6 && !clickable(node)) { node = node.parentElement; depth++; }
-              const target = node || el;
-              const r = target.getBoundingClientRect();
-              const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-              const opts = { bubbles: true, cancelable: true, view: window,
-                             clientX: cx, clientY: cy, button: 0, buttons: 0 };
-              target.dispatchEvent(new PointerEvent('pointerdown', opts));
-              target.dispatchEvent(new MouseEvent('mousedown', opts));
-              target.dispatchEvent(new PointerEvent('pointerup', opts));
-              target.dispatchEvent(new MouseEvent('mouseup', opts));
-              target.dispatchEvent(new MouseEvent('click', opts));
-              return target.tagName + '.' + (target.className || '').slice(0, 40);
+              const el = document.elementFromPoint(${x}, ${y});
+              if (!el) return null;
+              const opts = { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, button: 0 };
+              el.dispatchEvent(new PointerEvent('pointerdown', opts));
+              el.dispatchEvent(new MouseEvent('mousedown', opts));
+              el.dispatchEvent(new PointerEvent('pointerup', opts));
+              el.dispatchEvent(new MouseEvent('mouseup', opts));
+              el.dispatchEvent(new MouseEvent('click', opts));
+              return el.tagName;
             })()`,
             returnByValue: true
           });
