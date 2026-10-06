@@ -18,7 +18,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─── login auth ──────────────────────────────────────────────
+// ─── auth ────────────────────────────────────────────────────
 const OPEN_PATHS = new Set(["/api/health", "/api/login"]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
@@ -48,8 +48,7 @@ const sessions = new Map();
 
 function broadcast(sessionId, msg) {
   const entry = sessions.get(sessionId);
-  if (!entry || !entry.ws) return;
-  if (entry.ws.readyState !== 1) return;
+  if (!entry || !entry.ws || entry.ws.readyState !== 1) return;
   try { entry.ws.send(JSON.stringify(msg)); } catch (_) { }
 }
 
@@ -67,8 +66,6 @@ app.post("/api/start", async (req, res) => {
   };
   sessions.set(sessionId, entry);
 
-  console.log(`[solver] session ${sessionId} from user ${user}`);
-
   try {
     await acquire(sessionId);
   } catch (err) {
@@ -76,6 +73,7 @@ app.post("/api/start", async (req, res) => {
     return res.status(503).json({ error: "queue timeout — try again shortly" });
   }
 
+  console.log(`[solver] session ${sessionId} from user ${user}`);
   res.json({ sessionId });
 
   const sessionConfig = JSON.parse(JSON.stringify(config));
@@ -103,10 +101,20 @@ app.post("/api/start", async (req, res) => {
         const dims = await page.evaluate(() => ({
           width: window.innerWidth,
           height: window.innerHeight
-        })).catch(() => ({ width: 1366, height: 768 }));
+        })).catch(() => ({ width: 1920, height: 1080 }));
 
-        console.log(`[solver ${sessionId}] live view attached ${dims.width}x${dims.height}`);
         broadcast(sessionId, { type: "view-ready", width: dims.width, height: dims.height });
+        broadcast(sessionId, { type: "url", url: await live.currentUrl() });
+
+        // broadcast url every 2s so the toolbar stays in sync
+        const urlInterval = setInterval(async () => {
+          if (!entry.liveView) return clearInterval(urlInterval);
+          const u = await entry.liveView.currentUrl();
+          broadcast(sessionId, { type: "url", url: u });
+        }, 2000);
+        entry.urlInterval = urlInterval;
+
+        console.log(`[solver ${sessionId}] live view attached`);
       } catch (err) {
         console.error(`[solver ${sessionId}] live view failed:`, err.message);
       }
@@ -115,6 +123,7 @@ app.post("/api/start", async (req, res) => {
     .catch(err => broadcast(sessionId, { type: "fatal", message: err.message }))
     .finally(async () => {
       broadcast(sessionId, { type: "ended" });
+      if (entry.urlInterval) clearInterval(entry.urlInterval);
       if (entry.liveView) {
         try { await entry.liveView.stop(); } catch (_) { }
       }
@@ -133,7 +142,7 @@ app.post("/api/stop/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── http server + single websocket ──────────────────────────
+// ─── http + ws ───────────────────────────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
@@ -152,32 +161,31 @@ wss.on("connection", (ws, req) => {
   const sessionId = url.searchParams.get("sessionId");
   const token = url.searchParams.get("token");
 
-  if (!sessionId || !verify(token)) {
-    console.warn(`[ws] auth fail`);
-    return ws.close(4001, "auth");
-  }
+  if (!sessionId || !verify(token)) return ws.close(4001, "auth");
   const entry = sessions.get(sessionId);
-  if (!entry) {
-    console.warn(`[ws] no session ${sessionId}`);
-    return ws.close(4004, "no session");
-  }
+  if (!entry) return ws.close(4004, "no session");
 
-  console.log(`[ws ${sessionId}] connected`);
   entry.ws = ws;
   ws.send(JSON.stringify({ type: "hello", sessionId }));
 
   ws.on("message", async (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
+
     if (msg.type === "input" && entry.liveView) {
       await handleInput(entry.liveView.cdp, msg.payload || msg);
+    } else if (msg.type === "nav" && entry.liveView) {
+      if (msg.action === "back") await entry.liveView.goBack();
+      else if (msg.action === "forward") await entry.liveView.goForward();
+      else if (msg.action === "reload") await entry.liveView.reload();
+      else if (msg.action === "navigate") await entry.liveView.navigate(msg.url);
+      else if (msg.action === "resize") await entry.liveView.resize(msg.width, msg.height);
+      const u = await entry.liveView.currentUrl();
+      broadcast(sessionId, { type: "url", url: u });
     }
   });
 
-  ws.on("close", () => {
-    if (entry.ws === ws) entry.ws = null;
-    console.log(`[ws ${sessionId}] disconnected`);
-  });
+  ws.on("close", () => { if (entry.ws === ws) entry.ws = null; });
 });
 
 // ─── listen ──────────────────────────────────────────────────

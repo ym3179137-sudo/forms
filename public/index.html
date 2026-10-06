@@ -11,9 +11,9 @@
 
 <body>
 
-    <div class="wrap">
-
-        <section id="screen-login" class="screen">
+    <!-- ─── login screen ───────────────────────────────────────── -->
+    <div class="login-wrap" id="screen-login">
+        <div class="login-card">
             <h1>ixl-solver</h1>
             <p class="sub" id="boot-msg">sign in to continue.</p>
 
@@ -29,25 +29,34 @@
                 <button id="login-submit" type="button">Sign in</button>
             </div>
 
-            <div id="error-box" class="status err" hidden></div>
-        </section>
+            <div id="error-box" class="err" hidden></div>
+        </div>
+    </div>
 
-        <section id="screen-session" class="screen" hidden>
-            <div class="session-head">
-                <span class="session-id" id="session-id"></span>
-                <span class="view-status" id="viewer-status">connecting…</span>
-                <button id="stop-btn" type="button">Stop</button>
-            </div>
+    <!-- ─── browser screen ─────────────────────────────────────── -->
+    <div class="browser" id="screen-session" hidden>
 
-            <div id="viewer-wrap">
-                <canvas id="viewer" width="1366" height="768"></canvas>
-            </div>
+        <div class="toolbar">
+            <button class="tb-btn" id="nav-back" title="Back">◀</button>
+            <button class="tb-btn" id="nav-forward" title="Forward">▶</button>
+            <button class="tb-btn" id="nav-reload" title="Reload">⟳</button>
+            <input class="tb-url" id="nav-url" type="text" placeholder="https://www.ixl.com/" spellcheck="false" />
+            <button class="tb-btn" id="nav-go" title="Go">→</button>
+            <div class="tb-spacer"></div>
+            <span class="view-status" id="viewer-status">connecting…</span>
+            <button class="tb-btn danger" id="stop-btn" title="Stop">Stop</button>
+            <button class="tb-btn" id="fs-btn" title="Fullscreen">⛶</button>
+            <button class="tb-btn" id="back-btn" title="Exit">✕</button>
+        </div>
 
-            <div class="status" id="status">connecting…</div>
-            <div class="log" id="log"></div>
+        <div class="viewport" id="viewer-wrap">
+            <canvas id="viewer" width="1920" height="1080"></canvas>
+        </div>
 
-            <button id="back-btn" class="ghost" type="button">back to launcher</button>
-        </section>
+        <div class="statusbar">
+            <span id="session-id"></span>
+            <span class="sess-status" id="status">connecting…</span>
+        </div>
 
     </div>
 
