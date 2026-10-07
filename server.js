@@ -5,7 +5,7 @@ import http from "http";
 import net from "net";
 import express from "express";
 import { fileURLToPath } from "url";
-import { login, verify } from "./lib/auth.js";
+import { login, verify, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
 import { getAnswer } from "./lib/answer-engine.js";
 import { lookupAnswer, saveAnswer, recordWrongAnswer } from "./lib/answer-cache.js";
 
@@ -15,7 +15,7 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "
 const app = express();
 app.use(express.json({ limit: "5mb" }));
 
-// CORS for /api/solve from ixl.com pages
+// CORS for the extension
 app.use("/api", (req, res, next) => {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Headers", "Content-Type, X-IXL-Token");
@@ -48,20 +48,35 @@ app.post("/api/login", (req, res) => {
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// ─── SOLVE ────────────────────────────────────────────────────
+// ─── IXL creds ──────────────────────────────────────────────
+app.get("/api/ixl-creds", async (req, res) => {
+  try {
+    const creds = await getIxlCreds(req.ixlUser);
+    if (!creds) return res.json({ email: "", password: "", has: false });
+    res.json({ email: creds.email || "", password: creds.password || "", has: !!(creds.email && creds.password) });
+  } catch (err) {
+    res.json({ email: "", password: "", has: false });
+  }
+});
+
+app.post("/api/ixl-creds", async (req, res) => {
+  const { email, password } = req.body || {};
+  const ok = await saveIxlCreds(req.ixlUser, email || "", password || "");
+  res.json({ ok });
+});
+
+// ─── SOLVE ──────────────────────────────────────────────────
 app.post("/api/solve", async (req, res) => {
   try {
     const q = req.body || {};
     if (!q.stem || q.stem.length < 3) return res.status(400).json({ error: "no stem" });
 
-    // cache lookup first
     const cached = await lookupAnswer(q).catch(() => null);
     if (cached) {
       console.log("[solve] cache hit");
       return res.json(cached);
     }
 
-    // AI call
     const creds = {
       openrouterKey: process.env.OPENROUTER_API_KEY,
       geminiKey: process.env.GEMINI_API_KEY,
@@ -81,12 +96,9 @@ app.post("/api/feedback", async (req, res) => {
     const { question, correct, correctAnswerText } = req.body || {};
     if (!question) return res.status(400).json({ error: "no question" });
     if (correct === true) {
-      // don't re-save, but bump stats if we want
+      await saveAnswer(question, question._answer || {}, true).catch(() => { });
     } else {
       await recordWrongAnswer(question, question).catch(() => { });
-      if (correctAnswerText) {
-        // best-effort: parse and save
-      }
     }
     res.json({ ok: true });
   } catch (err) {
@@ -94,6 +106,7 @@ app.post("/api/feedback", async (req, res) => {
   }
 });
 
+// ─── VNC ────────────────────────────────────────────────────
 app.get("/vnc/package.json", (req, res) => res.json({ name: "novnc", version: "1.5.0" }));
 
 app.use("/vnc", (req, res) => {
@@ -131,5 +144,4 @@ const port = process.env.PORT || config.server.port || 3000;
 const host = process.env.PORT ? "0.0.0.0" : (config.server.host || "127.0.0.1");
 server.listen(port, host, () => {
   console.log(`[ixl-server] http://${host}:${port}`);
-  console.log(`[ixl-server] VNC at /vnc/vnc.html`);
 });

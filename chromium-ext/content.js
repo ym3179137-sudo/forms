@@ -1,4 +1,4 @@
-// IXL Solver content script — runs inside every ixl.com page
+// IXL Solver content script
 const API_BASE = window.__IXL_SOLVER_API__ || "https://ixl-solver-production.up.railway.app";
 
 let running = false;
@@ -86,27 +86,76 @@ function extractText(el) {
     return out.replace(/\s+/g, " ").trim();
 }
 
+// ─── smarter parser ─────────────────────────────────────────
 function parseQuestion() {
+    // ── tiles ────────────────────────────────────────────────
     const tiles = Array.from(document.querySelectorAll(
-        '.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"]'
+        '.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'
     )).filter(e => e.offsetParent !== null);
     const options = tiles.map(t => extractText(t)).filter(Boolean);
 
-    let questionText = "";
-    const qEl = document.querySelector('[data-testid="question-container"], [class*="QuestionContainer"], [class*="question-container"]');
-    if (qEl) questionText = extractText(qEl).slice(0, 2000);
-
+    // ── inputs ───────────────────────────────────────────────
     const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])'))
         .filter(i => !i.disabled && i.offsetParent !== null)
         .map(i => ({ placeholder: i.placeholder || "", ariaLabel: i.getAttribute("aria-label") || "" }));
+
+    // ── question text — grab the biggest text block on the left side ─
+    // IXL structures the question inside the main content area. Find all visible
+    // text-bearing elements and pick the one that looks like a prompt.
+    let stem = "";
+
+    // strategy 1: known IXL wrappers
+    const knownSel = [
+        '[data-testid="question-container"]',
+        '[class*="QuestionContainer"]',
+        '[class*="question-container"]',
+        '[class*="question-text"]',
+        '[class*="QuestionText"]',
+        'main'
+    ];
+    for (const s of knownSel) {
+        const candidates = Array.from(document.querySelectorAll(s)).filter(e => e.offsetParent !== null);
+        for (const c of candidates) {
+            const t = extractText(c);
+            if (t.length > stem.length && t.length < 3000) stem = t;
+        }
+        if (stem.length > 10) break;
+    }
+
+    // strategy 2: any <p> or <h*> that has a question mark or a math operator + digits
+    if (!stem || stem.length < 10) {
+        const candidates = Array.from(document.querySelectorAll("p, h1, h2, h3, h4, label, span"))
+            .filter(e => e.offsetParent !== null && e.children.length < 5);
+        for (const c of candidates) {
+            const t = extractText(c);
+            if (t.length < 8 || t.length > 400) continue;
+            if (tiles.some(tile => c.contains(tile) || tile.contains(c))) continue;
+            if (/\?|compare|evaluate|solve|which|what|how many|identify|select|choose|fill in|complete the/i.test(t)) {
+                stem = t;
+                break;
+            }
+        }
+    }
+
+    // strategy 3: build stem from whole page innerText, capped
+    if (!stem || stem.length < 5) {
+        const bodyText = (document.body.innerText || "").replace(/\s+/g, " ").trim();
+        // find the sentence containing "compare" or "evaluate" or "?"
+        const sentences = bodyText.split(/(?<=[.?!])\s+/);
+        const hit = sentences.find(s =>
+            /\?$/.test(s) || /\b(compare|evaluate|solve|which|what)\b/i.test(s)
+        );
+        if (hit) stem = hit.slice(0, 400);
+    }
 
     let type = "unknown";
     if (options.length >= 2) type = "multiple_choice";
     else if (inputs.length > 0) type = "fill_in";
 
-    return { type, stem: questionText, options, inputs };
+    return { type, stem: stem.slice(0, 2000), options, inputs };
 }
 
+// ─── click + type ────────────────────────────────────────────
 function clickAt(x, y) {
     const el = document.elementFromPoint(x, y);
     if (!el) return false;
@@ -123,10 +172,11 @@ function applyMultipleChoice(question, answer) {
     const idx = answer.answer_index;
     if (typeof idx !== "number") return false;
     const tiles = Array.from(document.querySelectorAll(
-        '.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"]'
+        '.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'
     )).filter(e => e.offsetParent !== null);
     const tile = tiles[idx];
     if (!tile) return false;
+    tile.click();
     const r = tile.getBoundingClientRect();
     clickAt(r.left + r.width / 2, r.top + r.height / 2);
     return true;
@@ -153,6 +203,7 @@ function clickSubmit() {
     return false;
 }
 
+// ─── backend ─────────────────────────────────────────────────
 async function askBackend(question) {
     const res = await fetch(`${API_BASE}/api/solve`, {
         method: "POST",
@@ -243,10 +294,10 @@ async function loop() {
             return;
         }
 
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 700));
         clickSubmit();
 
-        await new Promise(r => setTimeout(r, 2200));
+        await new Promise(r => setTimeout(r, 2500));
         const fb = readFeedback(sig);
 
         if (fb.correct === true) { pushLog("✓ correct", "ok"); setStatus("correct"); }
