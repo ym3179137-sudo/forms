@@ -2,27 +2,6 @@
     if (window.__ixl_panel_injected__) return;
     window.__ixl_panel_injected__ = true;
 
-    // ─── style ──────────────────────────────────────────────
-    const css = `
-    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 280px; background: rgba(18,22,34,0.96); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
-    #__ixl_panel.__hidden { display: none !important; }
-    #__ixl_panel .__ixl_header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    #__ixl_panel .__ixl_title { font-weight: 600; color: #8ab4ff; letter-spacing: 0.5px; }
-    #__ixl_panel .__ixl_min { background: transparent; border: none; color: #889; cursor: pointer; font-size: 14px; padding: 0 4px; line-height: 1; }
-    #__ixl_panel .__ixl_toggle { width: 100%; background: linear-gradient(180deg, #2a6eff, #1d54d6); color: #fff; border: none; border-radius: 6px; padding: 9px 10px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
-    #__ixl_panel .__ixl_toggle.__on { background: linear-gradient(180deg, #d64545, #a83232); }
-    #__ixl_panel .__ixl_status { margin-top: 8px; color: #aab; font-size: 11px; }
-    #__ixl_panel .__ixl_log { margin-top: 6px; max-height: 140px; overflow-y: auto; font-size: 10px; color: #889; line-height: 1.5; }
-    #__ixl_panel .__ixl_log div { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
-    #__ixl_panel .__ixl_log .ok { color: #6d8; }
-    #__ixl_panel .__ixl_log .err { color: #d67; }
-  `;
-    const style = document.createElement("style");
-    style.id = "__ixl_panel_style";
-    style.textContent = css;
-    document.documentElement.appendChild(style);
-
-    // ─── config ─────────────────────────────────────────────
     const API_BASE = "https://ixl-solver-production.up.railway.app";
     let token = "";
     try {
@@ -35,7 +14,22 @@
         }
     } catch (_) { }
 
-    // ─── state ──────────────────────────────────────────────
+    const css = `
+    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 300px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
+    #__ixl_panel.__hidden { display: none !important; }
+    #__ixl_panel .__ixl_header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    #__ixl_panel .__ixl_title { font-weight: 600; color: #8ab4ff; letter-spacing: 0.5px; }
+    #__ixl_panel .__ixl_min { background: transparent; border: none; color: #889; cursor: pointer; font-size: 14px; padding: 0 4px; }
+    #__ixl_panel .__ixl_toggle { width: 100%; background: linear-gradient(180deg,#2a6eff,#1d54d6); color: #fff; border: none; border-radius: 6px; padding: 9px 10px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    #__ixl_panel .__ixl_toggle.__on { background: linear-gradient(180deg,#d64545,#a83232); }
+    #__ixl_panel .__ixl_status { margin-top: 8px; color: #aab; font-size: 11px; }
+    #__ixl_panel .__ixl_log { margin-top: 6px; max-height: 160px; overflow-y: auto; font-size: 10px; color: #889; line-height: 1.5; }
+    #__ixl_panel .__ixl_log div { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    #__ixl_panel .__ixl_log .ok { color: #6d8; }
+    #__ixl_panel .__ixl_log .err { color: #d67; }
+    #__ixl_panel .__ixl_log .hit { color: #fc6; }
+  `;
+
     let running = false;
     let panelEl = null;
     let statusEl = null;
@@ -43,45 +37,66 @@
     let toggleBtn = null;
     let busy = false;
 
-    // ─── panel ──────────────────────────────────────────────
+    function ensureStyle() {
+        if (document.getElementById("__ixl_panel_style")) return;
+        const s = document.createElement("style");
+        s.id = "__ixl_panel_style";
+        s.textContent = css;
+        document.documentElement.appendChild(s);
+    }
+
     function buildPanel() {
-        if (panelEl) return;
-        panelEl = document.createElement("div");
-        panelEl.id = "__ixl_panel";
-        panelEl.innerHTML = `
-      <div class="__ixl_header">
-        <span class="__ixl_title">notes</span>
-        <button class="__ixl_min" title="Ctrl+M to hide">–</button>
-      </div>
-      <button class="__ixl_toggle">▶ Start Auto</button>
-      <div class="__ixl_status">status: idle</div>
-      <div class="__ixl_log"></div>
-    `;
-        document.documentElement.appendChild(panelEl);
+        if (panelEl && document.contains(panelEl)) return;
+        if (!document.getElementById("__ixl_panel")) {
+            panelEl = document.createElement("div");
+            panelEl.id = "__ixl_panel";
+            panelEl.innerHTML = `
+        <div class="__ixl_header">
+          <span class="__ixl_title">notes</span>
+          <button class="__ixl_min" title="Ctrl+M">–</button>
+        </div>
+        <button class="__ixl_toggle">▶ Start Auto</button>
+        <div class="__ixl_status">status: idle</div>
+        <div class="__ixl_log"></div>
+      `;
+            document.documentElement.appendChild(panelEl);
 
-        toggleBtn = panelEl.querySelector(".__ixl_toggle");
-        statusEl = panelEl.querySelector(".__ixl_status");
-        logEl = panelEl.querySelector(".__ixl_log");
+            toggleBtn = panelEl.querySelector(".__ixl_toggle");
+            statusEl = panelEl.querySelector(".__ixl_status");
+            logEl = panelEl.querySelector(".__ixl_log");
 
-        toggleBtn.addEventListener("click", () => {
-            running = !running;
-            statusEl.textContent = "status: " + (running ? "solving" : "idle");
-            toggleBtn.textContent = running ? "■ Stop Auto" : "▶ Start Auto";
-            toggleBtn.classList.toggle("__on", running);
-            pushLog(running ? "auto started" : "auto paused", running ? "ok" : "");
-            if (running) loop();
-        });
+            toggleBtn.addEventListener("click", () => {
+                running = !running;
+                statusEl.textContent = "status: " + (running ? "solving" : "idle");
+                toggleBtn.textContent = running ? "■ Stop Auto" : "▶ Start Auto";
+                toggleBtn.classList.toggle("__on", running);
+                pushLog(running ? "auto started" : "auto paused", running ? "ok" : "");
+                if (running) loop();
+            });
 
-        panelEl.querySelector(".__ixl_min").addEventListener("click", () => {
-            panelEl.classList.add("__hidden");
-        });
+            panelEl.querySelector(".__ixl_min").addEventListener("click", () => {
+                panelEl.classList.add("__hidden");
+            });
 
-        window.addEventListener("keydown", (e) => {
-            if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "m" || e.key === "M")) {
-                e.preventDefault(); e.stopPropagation();
-                panelEl.classList.toggle("__hidden");
+            window.addEventListener("keydown", (e) => {
+                if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "m" || e.key === "M")) {
+                    e.preventDefault(); e.stopPropagation();
+                    panelEl.classList.toggle("__hidden");
+                }
+            }, true);
+        }
+    }
+
+    // watchdog: if IXL removes the panel, put it back
+    function startWatchdog() {
+        const obs = new MutationObserver(() => {
+            ensureStyle();
+            if (!document.getElementById("__ixl_panel")) {
+                panelEl = null;
+                buildPanel();
             }
-        }, true);
+        });
+        obs.observe(document.documentElement, { childList: true, subtree: false });
     }
 
     function pushLog(text, cls) {
@@ -91,12 +106,11 @@
         d.textContent = text;
         logEl.appendChild(d);
         logEl.scrollTop = logEl.scrollHeight;
-        while (logEl.children.length > 30) logEl.removeChild(logEl.firstChild);
+        while (logEl.children.length > 25) logEl.removeChild(logEl.firstChild);
     }
 
     function setStatus(s) { if (statusEl) statusEl.textContent = "status: " + s; }
 
-    // ─── parser ─────────────────────────────────────────────
     function extractText(el) {
         if (!el) return "";
         let out = "";
@@ -114,9 +128,8 @@
     }
 
     function parseQuestion() {
-        const tiles = Array.from(document.querySelectorAll(
-            '.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'
-        )).filter(e => e.offsetParent !== null);
+        const tiles = Array.from(document.querySelectorAll('.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'))
+            .filter(e => e.offsetParent !== null);
         const options = tiles.map(t => extractText(t)).filter(Boolean);
 
         const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])'))
@@ -124,16 +137,17 @@
             .map(i => ({ placeholder: i.placeholder || "", ariaLabel: i.getAttribute("aria-label") || "" }));
 
         let stem = "";
-        const knownSel = ['[data-testid="question-container"]', '[class*="QuestionContainer"]', '[class*="question-container"]', '[class*="question-text"]', 'main'];
-        for (const s of knownSel) {
+        for (const s of ['[data-testid="question-container"]', '[class*="QuestionContainer"]', '[class*="question-container"]', '[class*="question-text"]', 'main']) {
             for (const c of Array.from(document.querySelectorAll(s)).filter(e => e.offsetParent !== null)) {
                 const t = extractText(c);
                 if (t.length > stem.length && t.length < 3000) stem = t;
             }
             if (stem.length > 10) break;
         }
+
         if (!stem || stem.length < 10) {
-            for (const c of Array.from(document.querySelectorAll("p, h1, h2, h3, label, span")).filter(e => e.offsetParent !== null && e.children.length < 5)) {
+            for (const c of Array.from(document.querySelectorAll("p, h1, h2, h3, label, span"))
+                .filter(e => e.offsetParent !== null && e.children.length < 5)) {
                 const t = extractText(c);
                 if (t.length < 8 || t.length > 400) continue;
                 if (tiles.some(tile => c.contains(tile) || tile.contains(c))) continue;
@@ -148,7 +162,6 @@
         return { type, stem: stem.slice(0, 2000), options, inputs };
     }
 
-    // ─── input ──────────────────────────────────────────────
     function clickAt(x, y) {
         const el = document.elementFromPoint(x, y);
         if (!el) return false;
@@ -164,7 +177,8 @@
     function applyMultipleChoice(question, answer) {
         const idx = answer.answer_index;
         if (typeof idx !== "number") return false;
-        const tiles = Array.from(document.querySelectorAll('.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]')).filter(e => e.offsetParent !== null);
+        const tiles = Array.from(document.querySelectorAll('.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'))
+            .filter(e => e.offsetParent !== null);
         const tile = tiles[idx];
         if (!tile) return false;
         try { tile.click(); } catch (_) { }
@@ -175,7 +189,8 @@
 
     function applyFillIn(answer) {
         const value = String(answer.value ?? "");
-        const input = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])')).find(i => !i.disabled && i.offsetParent !== null);
+        const input = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])'))
+            .find(i => !i.disabled && i.offsetParent !== null);
         if (!input) return false;
         input.focus();
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -193,7 +208,6 @@
         return false;
     }
 
-    // ─── backend ────────────────────────────────────────────
     async function askBackend(question) {
         const res = await fetch(`${API_BASE}/api/solve`, {
             method: "POST",
@@ -207,18 +221,12 @@
         return await res.json();
     }
 
-    function captureSignature() {
-        const tiles = Array.from(document.querySelectorAll('[class*="SelectableTile"][role="radio"]'));
-        return tiles.map(t => (t.innerText || "").trim()).join("|");
-    }
-
     function dismissFeedback() {
         const btns = Array.from(document.querySelectorAll("button"));
         const m = btns.find(b => /^(got it|continue|next|okay|ok)$/i.test((b.innerText || "").trim()) && !b.disabled);
         if (m) m.click();
     }
 
-    // ─── loop ───────────────────────────────────────────────
     async function loop() {
         if (!running || busy) return;
         busy = true;
@@ -229,12 +237,12 @@
             if (!q.stem || q.stem.length < 5) {
                 setStatus("no question yet");
                 busy = false;
-                setTimeout(loop, 700);
+                setTimeout(loop, 800);
                 return;
             }
 
             setStatus(`thinking (${q.type})`);
-            pushLog(`q[${q.type}] ${q.stem.slice(0, 60)}`);
+            pushLog(`q[${q.type}] ${q.stem.slice(0, 50)}`);
 
             let answer;
             try {
@@ -247,7 +255,7 @@
                 return;
             }
 
-            pushLog("ai → " + JSON.stringify(answer).slice(0, 80));
+            pushLog("ai → " + JSON.stringify(answer).slice(0, 70));
 
             let ok = false;
             if (answer.type === "multiple_choice") ok = applyMultipleChoice(q, answer);
@@ -264,7 +272,6 @@
             clickSubmit();
 
             await new Promise(r => setTimeout(r, 2500));
-            // simple feedback via page text
             const text = document.body.innerText || "";
             if (/sorry,\s*incorrect/i.test(text) || /the correct answer is/i.test(text)) {
                 pushLog("✗ wrong", "err");
@@ -273,7 +280,7 @@
                 pushLog("✓ correct", "ok");
                 setStatus("correct");
             } else {
-                pushLog("? feedback unknown");
+                pushLog("? feedback unclear");
             }
 
             await new Promise(r => setTimeout(r, 800));
@@ -285,11 +292,22 @@
         }
     }
 
-    // ─── boot ───────────────────────────────────────────────
     function boot() {
+        ensureStyle();
         buildPanel();
+        startWatchdog();
         pushLog("panel ready. click Start Auto.", "ok");
     }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
+
+    // also handle IXL's SPA navigations
+    let lastUrl = location.href;
+    setInterval(() => {
+        if (location.href !== lastUrl) {
+            lastUrl = location.href;
+            ensureStyle();
+            buildPanel();
+        }
+    }, 1000);
 })();
