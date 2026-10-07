@@ -16,7 +16,6 @@ sleep 1
 
 echo "[start] locating chromium binary..."
 CHROME_BIN=$(find /ms-playwright -type f -name chrome 2>/dev/null | head -1)
-
 if [ -z "$CHROME_BIN" ]; then
   echo "[start] FATAL: no chromium binary"
   node server.js
@@ -26,11 +25,19 @@ fi
 echo "[start] chromium: $CHROME_BIN"
 chmod +x "$CHROME_BIN" 2>/dev/null
 
-# clean profile every launch so nothing is restored from cache
-rm -rf /tmp/ixl-profile
-mkdir -p /tmp/ixl-profile
+# persistent profile on /data (Railway volume). falls back to /tmp if not mounted.
+PROFILE_DIR=/data/ixl-profile
+if [ ! -d "/data" ]; then
+  PROFILE_DIR=/tmp/ixl-profile
+  echo "[start] /data not mounted, using /tmp"
+fi
+mkdir -p "$PROFILE_DIR"
+echo "[start] profile: $PROFILE_DIR"
 
-echo "[start] launching chromium (app mode) on IXL signin..."
+# build a token for the extension
+SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
+
+echo "[start] launching chromium..."
 "$CHROME_BIN" \
   --no-sandbox \
   --disable-setuid-sandbox \
@@ -42,10 +49,11 @@ echo "[start] launching chromium (app mode) on IXL signin..."
   --disable-background-timer-throttling \
   --disable-backgrounding-occluded-windows \
   --disable-renderer-backgrounding \
-  --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,ChromeWhatsNewUI,ChromeVariations \
+  --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,ChromeWhatsNewUI,ChromeVariations,OptimizationHints,OptimizationGuideModelDownloading,InterestFeedContentSuggestions,MediaRouter,CalculateNativeWinOcclusion \
   --disable-sync \
   --disable-default-apps \
-  --disable-extensions \
+  --disable-extensions-except=/app/chromium-ext \
+  --load-extension=/app/chromium-ext \
   --disable-component-update \
   --disable-client-side-phishing-detection \
   --disable-prompt-on-repost \
@@ -53,15 +61,15 @@ echo "[start] launching chromium (app mode) on IXL signin..."
   --no-default-browser-check \
   --no-pings \
   --test-type \
-  --app="https://www.ixl.com/signin" \
+  --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \
-  --user-data-dir=/tmp/ixl-profile \
-  --disk-cache-size=104857600 \
-  --media-cache-size=104857600 \
+  --user-data-dir="$PROFILE_DIR" \
+  --disk-cache-size=209715200 \
+  --media-cache-size=52428800 \
   > /tmp/chrome.log 2>&1 &
 
 echo "[start] chrome pid: $!"
-sleep 3
+sleep 2
 echo "[start] launching node server..."
 node server.js
