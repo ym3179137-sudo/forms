@@ -1,10 +1,6 @@
-// IXL Solver — content script
-// runs inside every ixl.com page. reads the question, calls our backend, applies answer.
-
-const BACKEND = location.protocol === "https:" ? `https://${location.host}` : `http://${location.host}`;
+// IXL Solver content script — runs inside every ixl.com page
 const API_BASE = window.__IXL_SOLVER_API__ || "https://ixl-solver-production.up.railway.app";
 
-// state
 let running = false;
 let panelEl = null;
 let statusEl = null;
@@ -12,7 +8,6 @@ let logEl = null;
 let toggleBtn = null;
 let token = "";
 
-// read token from url once, persist for the session
 (function readToken() {
     const m = location.search.match(/[?&]ixl_solver_token=([^&]+)/);
     if (m) {
@@ -23,7 +18,6 @@ let token = "";
     }
 })();
 
-// ─── panel UI ──────────────────────────────────────────────────
 function buildPanel() {
     if (panelEl) return;
     panelEl = document.createElement("div");
@@ -76,7 +70,6 @@ function pushLog(text, cls) {
 
 function setStatus(s) { if (statusEl) statusEl.textContent = "status: " + s; }
 
-// ─── parser ─────────────────────────────────────────────────────
 function extractText(el) {
     if (!el) return "";
     let out = "";
@@ -94,22 +87,15 @@ function extractText(el) {
 }
 
 function parseQuestion() {
-    // find tile root first
     const tiles = Array.from(document.querySelectorAll(
         '.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"]'
     )).filter(e => e.offsetParent !== null);
-
     const options = tiles.map(t => extractText(t)).filter(Boolean);
 
-    // find question text
     let questionText = "";
     const qEl = document.querySelector('[data-testid="question-container"], [class*="QuestionContainer"], [class*="question-container"]');
-    if (qEl) {
-        const t = extractText(qEl).slice(0, 2000);
-        questionText = t;
-    }
+    if (qEl) questionText = extractText(qEl).slice(0, 2000);
 
-    // find inputs
     const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])'))
         .filter(i => !i.disabled && i.offsetParent !== null)
         .map(i => ({ placeholder: i.placeholder || "", ariaLabel: i.getAttribute("aria-label") || "" }));
@@ -121,7 +107,6 @@ function parseQuestion() {
     return { type, stem: questionText, options, inputs };
 }
 
-// ─── input handler ─────────────────────────────────────────────
 function clickAt(x, y) {
     const el = document.elementFromPoint(x, y);
     if (!el) return false;
@@ -168,14 +153,10 @@ function clickSubmit() {
     return false;
 }
 
-// ─── backend ──────────────────────────────────────────────────
 async function askBackend(question) {
     const res = await fetch(`${API_BASE}/api/solve`, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-IXL-Token": token
-        },
+        headers: { "Content-Type": "application/json", "X-IXL-Token": token },
         body: JSON.stringify(question)
     });
     if (!res.ok) {
@@ -219,7 +200,6 @@ function dismissFeedback() {
     if (m) m.click();
 }
 
-// ─── loop ─────────────────────────────────────────────────────
 let busy = false;
 async function loop() {
     if (!running || busy) return;
@@ -236,7 +216,6 @@ async function loop() {
         }
 
         const sig = captureSignature();
-
         setStatus(`thinking (${q.type})`);
         pushLog(`q[${q.type}] ${q.stem.slice(0, 60)}`);
 
@@ -253,7 +232,6 @@ async function loop() {
 
         pushLog("ai → " + JSON.stringify(answer).slice(0, 80));
 
-        // apply
         let ok = false;
         if (answer.type === "multiple_choice") ok = applyMultipleChoice(q, answer);
         else if (answer.type === "fill_in") ok = applyFillIn(answer);
@@ -287,7 +265,6 @@ async function loop() {
     }
 }
 
-// ─── boot ─────────────────────────────────────────────────────
 function boot() {
     buildPanel();
     pushLog("panel ready. click Start Auto.", "ok");

@@ -1,0 +1,27 @@
+{
+    "manifest_version": 3,
+    "name": "IXL Solver",
+    "version": "1.0.0",
+    "description": "auto-solve panel for IXL",
+    "content_scripts": [
+        {
+            "matches": [
+                "https://*.ixl.com/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "css": [
+                "panel.css"
+            ],
+            "run_at": "document_idle",
+            "all_frames": false
+        }
+    ],
+    "permissions": [
+        "storage"
+    ],
+    "host_permissions": [
+        "https://*/*"
+    ]
+}

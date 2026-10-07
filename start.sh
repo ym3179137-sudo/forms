@@ -21,11 +21,9 @@ if [ -z "$CHROME_BIN" ]; then
   node server.js
   exit 0
 fi
-
 echo "[start] chromium: $CHROME_BIN"
 chmod +x "$CHROME_BIN" 2>/dev/null
 
-# persistent profile on /data (Railway volume). falls back to /tmp if not mounted.
 PROFILE_DIR=/data/ixl-profile
 if [ ! -d "/data" ]; then
   PROFILE_DIR=/tmp/ixl-profile
@@ -34,7 +32,15 @@ fi
 mkdir -p "$PROFILE_DIR"
 echo "[start] profile: $PROFILE_DIR"
 
-# build a token for the extension
+# extension check
+EXT_ARGS=""
+if [ -f "/app/chromium-ext/manifest.json" ]; then
+  echo "[start] extension found, loading it"
+  EXT_ARGS="--disable-extensions-except=/app/chromium-ext --load-extension=/app/chromium-ext"
+else
+  echo "[start] no extension at /app/chromium-ext — skipping"
+fi
+
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
 echo "[start] launching chromium..."
@@ -52,8 +58,7 @@ echo "[start] launching chromium..."
   --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,ChromeWhatsNewUI,ChromeVariations,OptimizationHints,OptimizationGuideModelDownloading,InterestFeedContentSuggestions,MediaRouter,CalculateNativeWinOcclusion \
   --disable-sync \
   --disable-default-apps \
-  --disable-extensions-except=/app/chromium-ext \
-  --load-extension=/app/chromium-ext \
+  $EXT_ARGS \
   --disable-component-update \
   --disable-client-side-phishing-detection \
   --disable-prompt-on-repost \
