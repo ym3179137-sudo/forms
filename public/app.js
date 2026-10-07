@@ -39,7 +39,7 @@ function launch() {
   if (el("screen-session")) el("screen-session").hidden = false;
   const frame = el("vnc-frame");
   if (frame) {
-    frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify&reconnect=1&reconnect_delay=500&show_dot=1&compression=6&quality=6&view_only=0";
+    frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&scale=1&view_clip=0&path=vnc/websockify&reconnect=1&reconnect_delay=500&show_dot=0&compression=4&quality=8&view_only=0&toolbar=0&shared=1";
   }
 }
 
@@ -71,13 +71,10 @@ on("login-submit", "click", async () => {
     localStorage.setItem("ixl_token", token);
     localStorage.setItem("ixl_user", username);
 
-    // check if IXL creds are stored
     const creds = await loadIxlCreds();
     if (creds && creds.has) {
-      // have them already — skip modal, go straight in
       launch();
     } else {
-      // ask for IXL creds once
       openIxlModal(creds || null);
     }
   } catch (err) {
@@ -125,7 +122,19 @@ on("ixl-login-btn", "click", () => {
   openIxlModal({ email, password });
 });
 
-// panic mode
+// nav bar stubs (VNC handles its own nav; these are cosmetic for now)
+on("nav-back", "click", () => { });
+on("nav-forward", "click", () => { });
+on("nav-reload", "click", () => {
+  const frame = el("vnc-frame");
+  if (frame) {
+    const url = frame.src;
+    frame.src = "";
+    setTimeout(() => { frame.src = url; }, 100);
+  }
+});
+
+// panic mode: Ctrl+M
 window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && (e.key === "m" || e.key === "M")) {
     e.preventDefault(); e.stopPropagation();
