@@ -27,28 +27,27 @@ chmod +x "$CHROME_BIN" 2>/dev/null
 PROFILE_DIR=/data/ixl-profile
 if [ ! -d "/data" ]; then
   PROFILE_DIR=/tmp/ixl-profile
-  echo "[start] /data not mounted, using /tmp"
 fi
 mkdir -p "$PROFILE_DIR"
-echo "[start] profile: $PROFILE_DIR"
 
-# extension check
 EXT_ARGS=""
 if [ -f "/app/chromium-ext/manifest.json" ]; then
-  echo "[start] extension found, loading it"
   EXT_ARGS="--disable-extensions-except=/app/chromium-ext --load-extension=/app/chromium-ext"
-else
-  echo "[start] no extension at /app/chromium-ext — skipping"
+  echo "[start] extension: loaded"
 fi
+
+# REAL chrome UA (Windows) so IXL doesn't detect "Chrome for Testing"
+UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
 echo "[start] launching chromium..."
 "$CHROME_BIN" \
+  --user-agent="$UA" \
   --no-sandbox \
   --disable-setuid-sandbox \
   --disable-dev-shm-usage \
-  --disable-blink-features=AutomationControlled \
+  --disable-blink-features=AutomationControlled,ChromeForTesting \
   --disable-gpu \
   --disable-software-rasterizer \
   --disable-background-networking \
@@ -58,6 +57,7 @@ echo "[start] launching chromium..."
   --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,ChromeWhatsNewUI,ChromeVariations,OptimizationHints,OptimizationGuideModelDownloading,InterestFeedContentSuggestions,MediaRouter,CalculateNativeWinOcclusion \
   --disable-sync \
   --disable-default-apps \
+  --exclude-switches=enable-automation \
   $EXT_ARGS \
   --disable-component-update \
   --disable-client-side-phishing-detection \
@@ -65,7 +65,6 @@ echo "[start] launching chromium..."
   --no-first-run \
   --no-default-browser-check \
   --no-pings \
-  --test-type \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \

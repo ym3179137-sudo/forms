@@ -1,4 +1,27 @@
 // IXL Solver content script
+// stealth patches first — hide automation fingerprint
+(function stealth() {
+    try {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        Object.defineProperty(navigator, "plugins", {
+            get: () => [
+                { name: "PDF Viewer", filename: "internal-pdf-viewer" },
+                { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer" },
+                { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer" }
+            ]
+        });
+        Object.defineProperty(navigator, "mimeTypes", { get: () => [{ type: "application/pdf" }] });
+        Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+        Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+        Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+        if (!window.chrome) window.chrome = { runtime: {} };
+        if (!window.chrome.runtime) window.chrome.runtime = {};
+        if (!window.chrome.loadTimes) window.chrome.loadTimes = () => ({});
+        if (!window.chrome.csi) window.chrome.csi = () => ({});
+        if (!window.chrome.app) window.chrome.app = {};
+    } catch (_) { }
+})();
+
 const API_BASE = window.__IXL_SOLVER_API__ || "https://ixl-solver-production.up.railway.app";
 
 let running = false;
@@ -18,6 +41,7 @@ let token = "";
     }
 })();
 
+// ─── panel UI ────────────────────────────────────────────────
 function buildPanel() {
     if (panelEl) return;
     panelEl = document.createElement("div");
@@ -70,6 +94,7 @@ function pushLog(text, cls) {
 
 function setStatus(s) { if (statusEl) statusEl.textContent = "status: " + s; }
 
+// ─── parser ──────────────────────────────────────────────────
 function extractText(el) {
     if (!el) return "";
     let out = "";
@@ -86,25 +111,18 @@ function extractText(el) {
     return out.replace(/\s+/g, " ").trim();
 }
 
-// ─── smarter parser ─────────────────────────────────────────
 function parseQuestion() {
-    // ── tiles ────────────────────────────────────────────────
     const tiles = Array.from(document.querySelectorAll(
         '.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'
     )).filter(e => e.offsetParent !== null);
     const options = tiles.map(t => extractText(t)).filter(Boolean);
 
-    // ── inputs ───────────────────────────────────────────────
     const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])'))
         .filter(i => !i.disabled && i.offsetParent !== null)
         .map(i => ({ placeholder: i.placeholder || "", ariaLabel: i.getAttribute("aria-label") || "" }));
 
-    // ── question text — grab the biggest text block on the left side ─
-    // IXL structures the question inside the main content area. Find all visible
-    // text-bearing elements and pick the one that looks like a prompt.
     let stem = "";
 
-    // strategy 1: known IXL wrappers
     const knownSel = [
         '[data-testid="question-container"]',
         '[class*="QuestionContainer"]',
@@ -122,7 +140,6 @@ function parseQuestion() {
         if (stem.length > 10) break;
     }
 
-    // strategy 2: any <p> or <h*> that has a question mark or a math operator + digits
     if (!stem || stem.length < 10) {
         const candidates = Array.from(document.querySelectorAll("p, h1, h2, h3, h4, label, span"))
             .filter(e => e.offsetParent !== null && e.children.length < 5);
@@ -137,10 +154,8 @@ function parseQuestion() {
         }
     }
 
-    // strategy 3: build stem from whole page innerText, capped
     if (!stem || stem.length < 5) {
         const bodyText = (document.body.innerText || "").replace(/\s+/g, " ").trim();
-        // find the sentence containing "compare" or "evaluate" or "?"
         const sentences = bodyText.split(/(?<=[.?!])\s+/);
         const hit = sentences.find(s =>
             /\?$/.test(s) || /\b(compare|evaluate|solve|which|what)\b/i.test(s)
@@ -155,7 +170,7 @@ function parseQuestion() {
     return { type, stem: stem.slice(0, 2000), options, inputs };
 }
 
-// ─── click + type ────────────────────────────────────────────
+// ─── input ───────────────────────────────────────────────────
 function clickAt(x, y) {
     const el = document.elementFromPoint(x, y);
     if (!el) return false;
@@ -176,7 +191,7 @@ function applyMultipleChoice(question, answer) {
     )).filter(e => e.offsetParent !== null);
     const tile = tiles[idx];
     if (!tile) return false;
-    tile.click();
+    try { tile.click(); } catch (_) { }
     const r = tile.getBoundingClientRect();
     clickAt(r.left + r.width / 2, r.top + r.height / 2);
     return true;
@@ -251,6 +266,7 @@ function dismissFeedback() {
     if (m) m.click();
 }
 
+// ─── main loop ───────────────────────────────────────────────
 let busy = false;
 async function loop() {
     if (!running || busy) return;
@@ -316,6 +332,7 @@ async function loop() {
     }
 }
 
+// ─── boot ────────────────────────────────────────────────────
 function boot() {
     buildPanel();
     pushLog("panel ready. click Start Auto.", "ok");
