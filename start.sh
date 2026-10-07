@@ -14,14 +14,11 @@ echo "[start] booting websockify on :6080..."
 websockify --web /usr/share/novnc 6080 localhost:5900 &
 sleep 1
 
-# USE REAL CHROME, not playwright's chromium
 CHROME_BIN="/usr/bin/google-chrome-stable"
 if [ ! -f "$CHROME_BIN" ]; then
-  echo "[start] real chrome missing, falling back"
   CHROME_BIN=$(find /ms-playwright -type f -name chrome 2>/dev/null | head -1)
 fi
 echo "[start] chrome: $CHROME_BIN"
-chmod +x "$CHROME_BIN" 2>/dev/null
 
 PROFILE_DIR=/data/ixl-profile
 if [ ! -d "/data" ]; then
@@ -29,18 +26,11 @@ if [ ! -d "/data" ]; then
 fi
 mkdir -p "$PROFILE_DIR"
 
-EXT_ARGS=""
-if [ -f "/app/chromium-ext/manifest.json" ]; then
-  echo "[start] extension found"
-  EXT_ARGS="--disable-extensions-except=/app/chromium-ext --load-extension=/app/chromium-ext"
-fi
-
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
-echo "[start] launching chrome..."
+echo "[start] launching chrome with CDP on 9222..."
 "$CHROME_BIN" \
   --no-sandbox \
-  --disable-setuid-sandbox \
   --disable-dev-shm-usage \
   --disable-blink-features=AutomationControlled \
   --disable-gpu \
@@ -61,7 +51,8 @@ echo "[start] launching chrome..."
   --no-pings \
   --password-store=basic \
   --use-mock-keychain \
-  $EXT_ARGS \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=127.0.0.1 \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \
@@ -71,6 +62,6 @@ echo "[start] launching chrome..."
   > /tmp/chrome.log 2>&1 &
 
 echo "[start] chrome pid: $!"
-sleep 2
+sleep 3
 echo "[start] launching node server..."
 node server.js
