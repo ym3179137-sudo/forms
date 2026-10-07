@@ -18,9 +18,10 @@ async function tryLogin(u, p) {
 function launch() {
   if (el("screen-login")) el("screen-login").hidden = true;
   if (el("screen-session")) el("screen-session").hidden = false;
-  // load noVNC in the iframe
   const frame = el("vnc-frame");
-  if (frame) frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&path=websockify&password=";
+  if (frame) {
+    frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify&reconnect=1&reconnect_delay=1000&show_dot=1";
+  }
 }
 
 on("login-submit", "click", async () => {
@@ -57,7 +58,6 @@ on("fs-btn", "click", () => {
   else document.exitFullscreen().catch(() => { });
 });
 
-// panic mode via Ctrl+M
 window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && (e.key === "m" || e.key === "M")) {
     e.preventDefault(); e.stopPropagation();
