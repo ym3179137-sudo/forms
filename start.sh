@@ -31,6 +31,7 @@ mkdir -p "$PROFILE_DIR"
 
 EXT_ARGS=""
 if [ -f "/app/chromium-ext/manifest.json" ]; then
+  echo "[start] extension found"
   EXT_ARGS="--disable-extensions-except=/app/chromium-ext --load-extension=/app/chromium-ext"
 fi
 
