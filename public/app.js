@@ -3,6 +3,7 @@ function on(id, evt, fn) { const e = el(id); if (e) e.addEventListener(evt, fn);
 
 let token = localStorage.getItem("ixl_token") || "";
 let username = localStorage.getItem("ixl_user") || "";
+let launched = false;
 
 async function tryLogin(u, p) {
   const res = await fetch("/api/login", {
@@ -35,6 +36,8 @@ async function saveIxlCreds(email, password) {
 }
 
 function launch() {
+  if (launched) return;
+  launched = true;
   if (el("screen-login")) el("screen-login").hidden = true;
   if (el("screen-session")) el("screen-session").hidden = false;
   const frame = el("vnc-frame");
@@ -107,6 +110,7 @@ on("back-btn", "click", () => {
   if (el("screen-login")) el("screen-login").hidden = false;
   const frame = el("vnc-frame");
   if (frame) frame.src = "";
+  launched = false;
 });
 
 on("fs-btn", "click", () => {
@@ -122,7 +126,7 @@ on("ixl-login-btn", "click", () => {
   openIxlModal({ email, password });
 });
 
-// nav bar stubs (VNC handles its own nav; these are cosmetic for now)
+// nav bar stubs
 on("nav-back", "click", () => { });
 on("nav-forward", "click", () => { });
 on("nav-reload", "click", () => {

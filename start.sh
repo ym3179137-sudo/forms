@@ -7,7 +7,7 @@ export DISPLAY=:99
 sleep 1
 
 echo "[start] booting x11vnc..."
-x11vnc -display :99 -nopw -forever -shared -rfbport 5900 -xkb -noxrecord -noxfixes -noxdamage -wait 5 -defer 5 -nopw -threads -ping 5 &
+x11vnc -display :99 -nopw -forever -shared -rfbport 5900 -xkb -noxrecord -noxfixes -noxdamage -wait 5 -defer 5 -threads -ping 5 &
 sleep 1
 
 echo "[start] booting websockify on :6080..."
@@ -18,7 +18,7 @@ echo "[start] locating chromium binary..."
 CHROME_BIN=$(find /ms-playwright -type f -name chrome 2>/dev/null | head -1)
 
 if [ -z "$CHROME_BIN" ]; then
-  echo "[start] FATAL: no chromium binary found"
+  echo "[start] FATAL: no chromium binary"
   node server.js
   exit 0
 fi
@@ -26,7 +26,11 @@ fi
 echo "[start] chromium: $CHROME_BIN"
 chmod +x "$CHROME_BIN" 2>/dev/null
 
-# launch chromium straight to IXL sign-in page
+# clean profile every launch so nothing is restored from cache
+rm -rf /tmp/ixl-profile
+mkdir -p /tmp/ixl-profile
+
+echo "[start] launching chromium (app mode) on IXL signin..."
 "$CHROME_BIN" \
   --no-sandbox \
   --disable-setuid-sandbox \
@@ -38,22 +42,26 @@ chmod +x "$CHROME_BIN" 2>/dev/null
   --disable-background-timer-throttling \
   --disable-backgrounding-occluded-windows \
   --disable-renderer-backgrounding \
-  --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache \
+  --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,ChromeWhatsNewUI,ChromeVariations \
   --disable-sync \
   --disable-default-apps \
   --disable-extensions \
+  --disable-component-update \
+  --disable-client-side-phishing-detection \
+  --disable-prompt-on-repost \
   --no-first-run \
   --no-default-browser-check \
   --no-pings \
+  --test-type \
+  --app="https://www.ixl.com/signin" \
   --window-position=0,0 \
   --window-size=1280,720 \
-  --kiosk \
   --user-data-dir=/tmp/ixl-profile \
   --disk-cache-size=104857600 \
   --media-cache-size=104857600 \
-  https://www.ixl.com/signin > /tmp/chrome.log 2>&1 &
+  > /tmp/chrome.log 2>&1 &
 
 echo "[start] chrome pid: $!"
-sleep 2
+sleep 3
 echo "[start] launching node server..."
 node server.js
