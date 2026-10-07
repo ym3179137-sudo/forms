@@ -14,14 +14,13 @@ echo "[start] booting websockify on :6080..."
 websockify --web /usr/share/novnc 6080 localhost:5900 &
 sleep 1
 
-echo "[start] locating chromium binary..."
-CHROME_BIN=$(find /ms-playwright -type f -name chrome 2>/dev/null | head -1)
-if [ -z "$CHROME_BIN" ]; then
-  echo "[start] FATAL: no chromium binary"
-  node server.js
-  exit 0
+# USE REAL CHROME, not playwright's chromium
+CHROME_BIN="/usr/bin/google-chrome-stable"
+if [ ! -f "$CHROME_BIN" ]; then
+  echo "[start] real chrome missing, falling back"
+  CHROME_BIN=$(find /ms-playwright -type f -name chrome 2>/dev/null | head -1)
 fi
-echo "[start] chromium: $CHROME_BIN"
+echo "[start] chrome: $CHROME_BIN"
 chmod +x "$CHROME_BIN" 2>/dev/null
 
 PROFILE_DIR=/data/ixl-profile
@@ -33,38 +32,35 @@ mkdir -p "$PROFILE_DIR"
 EXT_ARGS=""
 if [ -f "/app/chromium-ext/manifest.json" ]; then
   EXT_ARGS="--disable-extensions-except=/app/chromium-ext --load-extension=/app/chromium-ext"
-  echo "[start] extension: loaded"
 fi
-
-# REAL chrome UA (Windows) so IXL doesn't detect "Chrome for Testing"
-UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
-echo "[start] launching chromium..."
+echo "[start] launching chrome..."
 "$CHROME_BIN" \
-  --user-agent="$UA" \
   --no-sandbox \
   --disable-setuid-sandbox \
   --disable-dev-shm-usage \
-  --disable-blink-features=AutomationControlled,ChromeForTesting \
+  --disable-blink-features=AutomationControlled \
   --disable-gpu \
   --disable-software-rasterizer \
   --disable-background-networking \
   --disable-background-timer-throttling \
   --disable-backgrounding-occluded-windows \
   --disable-renderer-backgrounding \
-  --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,ChromeWhatsNewUI,ChromeVariations,OptimizationHints,OptimizationGuideModelDownloading,InterestFeedContentSuggestions,MediaRouter,CalculateNativeWinOcclusion \
+  --disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,ChromeWhatsNewUI,ChromeVariations,OptimizationHints,MediaRouter,CalculateNativeWinOcclusion \
   --disable-sync \
   --disable-default-apps \
-  --exclude-switches=enable-automation \
-  $EXT_ARGS \
   --disable-component-update \
   --disable-client-side-phishing-detection \
   --disable-prompt-on-repost \
+  --disable-infobars \
   --no-first-run \
   --no-default-browser-check \
   --no-pings \
+  --password-store=basic \
+  --use-mock-keychain \
+  $EXT_ARGS \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \

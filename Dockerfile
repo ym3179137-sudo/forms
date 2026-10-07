@@ -13,13 +13,19 @@ RUN apt-get update && apt-get install -y \
     novnc websockify \
     && rm -rf /var/lib/apt/lists/*
 
+# install REAL Google Chrome (not Chrome for Testing)
+RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get update \
+    && apt-get install -y /tmp/chrome.deb \
+    && rm /tmp/chrome.deb \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx playwright install chromium --with-deps
-RUN find /ms-playwright -maxdepth 3 -type f -name chrome
 
 COPY . .
 
