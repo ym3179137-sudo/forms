@@ -18,7 +18,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
-RUN npx playwright install chromium --with-deps
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx playwright install chromium --with-deps && ls -la /ms-playwright || true
 
 COPY . .
 
