@@ -44,6 +44,7 @@
                 <input class="tb-url" id="nav-url" type="text" placeholder="www.ixl.com" spellcheck="false" />
             </div>
             <div class="tb-right">
+                <button class="tb-btn" id="ixl-login-btn" title="Auto-login IXL">🔑</button>
                 <button class="tb-btn" id="fs-btn" title="Fullscreen (Ctrl+M)">⛶</button>
                 <button class="tb-btn" id="back-btn" title="Exit">✕</button>
             </div>
@@ -67,6 +68,26 @@
             <span id="session-id">live vnc</span>
             <span class="sess-status" id="status">connected</span>
             <span class="view-status" id="viewer-status">ready</span>
+        </div>
+    </div>
+
+    <!-- IXL credentials popup -->
+    <div class="ixl-modal" id="ixl-modal" hidden>
+        <div class="ixl-modal-card">
+            <h2>IXL Auto-Login</h2>
+            <p class="sub">Save your IXL login. It will auto-fill whenever you open a session.</p>
+            <label>
+                IXL username or email
+                <input type="text" id="ixl-email" autocomplete="off" />
+            </label>
+            <label>
+                IXL password
+                <input type="password" id="ixl-pass" autocomplete="off" />
+            </label>
+            <div class="ixl-modal-actions">
+                <button class="ghost" id="ixl-skip" type="button">Skip</button>
+                <button id="ixl-save" type="button">Save &amp; Log In</button>
+            </div>
         </div>
     </div>
 

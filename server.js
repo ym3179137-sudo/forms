@@ -5,7 +5,7 @@ import http from "http";
 import net from "net";
 import express from "express";
 import { fileURLToPath } from "url";
-import { login, verify } from "./lib/auth.js";
+import { login, verify, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
@@ -31,18 +31,31 @@ app.post("/api/login", (req, res) => {
   const { username, password } = req.body || {};
   const token = login(username, password);
   if (!token) return res.status(401).json({ error: "invalid username or password" });
-  console.log(`[auth] ${username} logged in`);
   res.json({ token, username });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// fake package.json so noVNC's version check stops 404'ing
+app.get("/api/ixl-creds", async (req, res) => {
+  try {
+    const creds = await getIxlCreds(req.ixlUser);
+    if (!creds) return res.json({ email: "", password: "", has: false });
+    res.json({ email: creds.email, password: creds.password, has: !!(creds.email && creds.password) });
+  } catch (_) {
+    res.json({ email: "", password: "", has: false });
+  }
+});
+
+app.post("/api/ixl-creds", async (req, res) => {
+  const { email, password } = req.body || {};
+  const ok = await saveIxlCreds(req.ixlUser, email || "", password || "");
+  res.json({ ok });
+});
+
 app.get("/vnc/package.json", (req, res) => {
   res.json({ name: "novnc", version: "1.5.0" });
 });
 
-// proxy static noVNC assets from websockify's http server on :6080
 app.use("/vnc", (req, res) => {
   const targetPath = req.url === "/" ? "/vnc.html" : req.url;
   const opts = {
@@ -65,13 +78,8 @@ app.use("/vnc", (req, res) => {
 
 const server = http.createServer(app);
 
-// upgrade handler: /vnc/websockify → raw TCP bridge to websockify on :6080
 server.on("upgrade", (req, socket, head) => {
-  if (!req.url.startsWith("/vnc/websockify")) {
-    socket.destroy();
-    return;
-  }
-
+  if (!req.url.startsWith("/vnc/websockify")) { socket.destroy(); return; }
   const backend = net.connect(6080, "127.0.0.1", () => {
     const backendPath = req.url.replace(/^\/vnc/, "");
     const headers = Object.entries(req.headers)
@@ -82,11 +90,7 @@ server.on("upgrade", (req, socket, head) => {
     backend.pipe(socket);
     socket.pipe(backend);
   });
-
-  backend.on("error", (err) => {
-    console.error("[vnc ws bridge]", err.message);
-    try { socket.destroy(); } catch (_) { }
-  });
+  backend.on("error", () => { try { socket.destroy(); } catch (_) { } });
   socket.on("error", () => { try { backend.destroy(); } catch (_) { } });
   socket.on("close", () => { try { backend.destroy(); } catch (_) { } });
 });

@@ -15,13 +15,47 @@ async function tryLogin(u, p) {
   return data;
 }
 
+async function loadIxlCreds() {
+  try {
+    const res = await fetch("/api/ixl-creds", { headers: { "X-IXL-Token": token } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (_) { return null; }
+}
+
+async function saveIxlCreds(email, password) {
+  try {
+    const res = await fetch("/api/ixl-creds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-IXL-Token": token },
+      body: JSON.stringify({ email, password })
+    });
+    return await res.json();
+  } catch (_) { return { ok: false }; }
+}
+
 function launch() {
   if (el("screen-login")) el("screen-login").hidden = true;
   if (el("screen-session")) el("screen-session").hidden = false;
   const frame = el("vnc-frame");
   if (frame) {
-    frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify&reconnect=1&reconnect_delay=1000&show_dot=1";
+    frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify&reconnect=1&reconnect_delay=500&show_dot=1&compression=6&quality=6&view_only=0";
   }
+}
+
+function openIxlModal(prefill) {
+  const modal = el("ixl-modal");
+  if (!modal) return;
+  if (prefill) {
+    if (el("ixl-email")) el("ixl-email").value = prefill.email || "";
+    if (el("ixl-pass")) el("ixl-pass").value = prefill.password || "";
+  }
+  modal.hidden = false;
+}
+
+function closeIxlModal() {
+  const modal = el("ixl-modal");
+  if (modal) modal.hidden = true;
 }
 
 on("login-submit", "click", async () => {
@@ -36,7 +70,16 @@ on("login-submit", "click", async () => {
     username = data.username;
     localStorage.setItem("ixl_token", token);
     localStorage.setItem("ixl_user", username);
-    launch();
+
+    // check if IXL creds are stored
+    const creds = await loadIxlCreds();
+    if (creds && creds.has) {
+      // have them already — skip modal, go straight in
+      launch();
+    } else {
+      // ask for IXL creds once
+      openIxlModal(creds || null);
+    }
   } catch (err) {
     if (el("error-box")) { el("error-box").hidden = false; el("error-box").textContent = err.message; }
     if (el("boot-msg")) el("boot-msg").textContent = "sign in to continue.";
@@ -44,6 +87,23 @@ on("login-submit", "click", async () => {
 });
 
 on("pass-input", "keydown", (e) => { if (e.key === "Enter") el("login-submit")?.click(); });
+
+on("ixl-save", "click", async () => {
+  const email = el("ixl-email")?.value.trim() || "";
+  const password = el("ixl-pass")?.value || "";
+  if (!email || !password) return;
+  const btn = el("ixl-save");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  await saveIxlCreds(email, password);
+  if (btn) { btn.disabled = false; btn.textContent = "Save & Log In"; }
+  closeIxlModal();
+  launch();
+});
+
+on("ixl-skip", "click", () => {
+  closeIxlModal();
+  launch();
+});
 
 on("back-btn", "click", () => {
   if (el("screen-session")) el("screen-session").hidden = true;
@@ -58,6 +118,14 @@ on("fs-btn", "click", () => {
   else document.exitFullscreen().catch(() => { });
 });
 
+on("ixl-login-btn", "click", () => {
+  const email = el("ixl-email")?.value.trim() || "";
+  const password = el("ixl-pass")?.value || "";
+  if (!email || !password) { openIxlModal(); return; }
+  openIxlModal({ email, password });
+});
+
+// panic mode
 window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && (e.key === "m" || e.key === "M")) {
     e.preventDefault(); e.stopPropagation();
