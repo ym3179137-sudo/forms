@@ -1,8 +1,8 @@
 #!/bin/bash
-set -e
+set +e
 
 echo "[start] booting Xvfb..."
-Xvfb :99 -screen 0 1366x768x24 -ac +extension GLX +render -noreset &
+Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
 export DISPLAY=:99
 sleep 2
 
@@ -16,25 +16,18 @@ websockify --web /usr/share/novnc 6080 localhost:5900 &
 sleep 2
 
 echo "[start] locating chromium binary..."
-CHROME_BIN=""
-for p in \
-  /ms-playwright/chromium-*/chrome-linux/chrome \
-  /root/.cache/ms-playwright/chromium-*/chrome-linux/chrome \
-  /usr/bin/chromium \
-  /usr/bin/chromium-browser \
-  /usr/bin/google-chrome ; do
-  if ls $p >/dev/null 2>&1; then
-    CHROME_BIN=$(ls $p 2>/dev/null | head -1)
-    break
-  fi
-done
+CHROME_BIN=$(find /ms-playwright -type f -name chrome 2>/dev/null | head -1)
+if [ -z "$CHROME_BIN" ]; then
+  CHROME_BIN=$(find /ms-playwright -type f -name 'chrome*' 2>/dev/null | head -1)
+fi
 
 if [ -z "$CHROME_BIN" ]; then
-  echo "[start] FATAL: no chromium binary found"
-  ls -la /ms-playwright 2>/dev/null || true
-  ls -la /root/.cache/ms-playwright 2>/dev/null || true
+  echo "[start] FATAL: no chromium binary. dumping tree:"
+  find /ms-playwright -maxdepth 4 -type d 2>/dev/null
+  find /ms-playwright -maxdepth 4 -type f -name 'chrome*' 2>/dev/null
 else
   echo "[start] chromium: $CHROME_BIN"
+  chmod +x "$CHROME_BIN" 2>/dev/null
   echo "[start] launching chromium on IXL..."
   "$CHROME_BIN" \
     --no-sandbox \
@@ -43,7 +36,7 @@ else
     --disable-blink-features=AutomationControlled \
     --disable-gpu \
     --window-position=0,0 \
-    --window-size=1366,768 \
+    --window-size=1280,720 \
     --kiosk \
     --user-data-dir=/tmp/ixl-profile \
     --no-first-run \
@@ -54,8 +47,10 @@ else
     --disable-session-crashed-bubble \
     --disable-restore-session-state \
     https://www.ixl.com/ > /tmp/chrome.log 2>&1 &
-
   echo "[start] chrome pid: $!"
+  sleep 3
+  echo "[start] chrome log:"
+  cat /tmp/chrome.log 2>/dev/null | head -20
 fi
 
 echo "[start] launching node server..."
