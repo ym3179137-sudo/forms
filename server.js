@@ -101,4 +101,4 @@ const host = process.env.PORT ? "0.0.0.0" : (config.server.host || "127.0.0.1");
 server.listen(port, host, () => {
   console.log(`[ixl-server] http://${host}:${port}`);
   console.log(`[ixl-server] VNC embedded at /vnc/vnc.html`);
-});
+})
