@@ -2,13 +2,13 @@ import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import http from "http";
-import net from "net";
 import express from "express";
 import { fileURLToPath } from "url";
 import { login, verify, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
 import { getAnswer } from "./lib/answer-engine.js";
 import { lookupAnswer, saveAnswer, recordWrongAnswer } from "./lib/answer-cache.js";
 import { ensureInjected } from "./lib/inject.js";
+import { loadSecrets } from "./lib/keys.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
@@ -27,6 +27,15 @@ app.use("/api", (req, res, next) => {
 
 app.use(express.static(path.join(__dirname, "public")));
 
+// keep the process alive
+process.on("uncaughtException", (err) => {
+  console.error("[uncaught]", err.message, err.stack?.split("\n")[1]);
+});
+process.on("unhandledRejection", (err) => {
+  console.error("[unhandled]", err?.message || err);
+});
+
+// ─── auth middleware ────────────────────────────────────────
 const OPEN_PATHS = new Set(["/api/health", "/api/login", "/api/solve", "/api/feedback"]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
@@ -34,18 +43,25 @@ app.use((req, res, next) => {
   if (req.method === "GET" && !req.path.startsWith("/api/")) return next();
   if (req.path === "/") return next();
   const token = req.headers["x-ixl-token"] || req.query.token;
-  const payload = verify(token);
-  if (!payload) return res.status(401).json({ error: "not logged in" });
-  req.ixlUser = payload.u;
-  next();
+  verify(token).then((payload) => {
+    if (!payload) return res.status(401).json({ error: "not logged in" });
+    req.ixlUser = payload.u;
+    next();
+  }).catch(() => res.status(401).json({ error: "auth error" }));
 });
 
-app.post("/api/login", (req, res) => {
-  const { username, password } = req.body || {};
-  const token = login(username, password);
-  if (!token) return res.status(401).json({ error: "invalid username or password" });
-  console.log(`[auth] ${username} logged in`);
-  res.json({ token, username });
+// ─── login ──────────────────────────────────────────────────
+app.post("/api/login", async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const token = await login(username, password);
+    if (!token) return res.status(401).json({ error: "invalid username or password" });
+    console.log(`[auth] ${username} logged in`);
+    res.json({ token, username });
+  } catch (err) {
+    console.error("[login]", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
@@ -62,9 +78,13 @@ app.get("/api/ixl-creds", async (req, res) => {
 });
 
 app.post("/api/ixl-creds", async (req, res) => {
-  const { email, password } = req.body || {};
-  const ok = await saveIxlCreds(req.ixlUser, email || "", password || "");
-  res.json({ ok });
+  try {
+    const { email, password } = req.body || {};
+    const ok = await saveIxlCreds(req.ixlUser, email || "", password || "");
+    res.json({ ok });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── SOLVE ──────────────────────────────────────────────────
@@ -79,13 +99,8 @@ app.post("/api/solve", async (req, res) => {
       return res.json(cached);
     }
 
-    const creds = {
-      openrouterKey: process.env.OPENROUTER_API_KEY,
-      geminiKey: process.env.GEMINI_API_KEY,
-      groqKey: process.env.GROQ_API_KEY
-    };
-    const answer = await getAnswer(q, config, creds);
-    console.log("[solve] ai →", JSON.stringify(answer).slice(0, 100));
+    const answer = await getAnswer(q, config);
+    console.log("[solve] ai →", JSON.stringify(answer).slice(0, 120));
     res.json(answer);
   } catch (err) {
     console.error("[solve] error:", err.message);
@@ -108,7 +123,7 @@ app.post("/api/feedback", async (req, res) => {
   }
 });
 
-// ─── VNC ────────────────────────────────────────────────────
+// ─── VNC proxy ──────────────────────────────────────────────
 app.get("/vnc/package.json", (req, res) => res.json({ name: "novnc", version: "1.5.0" }));
 
 app.use("/vnc", (req, res) => {
@@ -126,39 +141,76 @@ app.use("/vnc", (req, res) => {
   });
   proxyReq.on("error", (err) => {
     console.error("[vnc proxy]", err.message);
-    if (!res.headersSent) res.status(502).send("vnc proxy error");
+    if (!res.headersSent) res.status(502).send("vnc err");
   });
   req.pipe(proxyReq);
 });
 
+// ─── HTTP server + VNC websocket bridge ────────────────────
 const server = http.createServer(app);
 
 server.on("upgrade", (req, socket, head) => {
-  if (!req.url.startsWith("/vnc/websockify")) return socket.destroy();
-  const backend = net.connect(6080, "127.0.0.1", () => {
-    const backendPath = req.url.replace(/^\/vnc/, "");
-    const headers = Object.entries(req.headers)
-      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
-      .join("\r\n");
-    backend.write(`${req.method} ${backendPath} HTTP/1.1\r\n${headers}\r\n\r\n`);
-    if (head?.length) backend.write(head);
-    backend.pipe(socket);
-    socket.pipe(backend);
+  if (!req.url.startsWith("/vnc/websockify")) {
+    socket.destroy();
+    return;
+  }
+
+  const backendPath = req.url.replace(/^\/vnc/, "") || "/websockify";
+  const headers = { ...req.headers, host: "127.0.0.1:6080" };
+  delete headers["content-length"];
+
+  const proxyReq = http.request({
+    host: "127.0.0.1",
+    port: 6080,
+    method: "GET",
+    path: backendPath,
+    headers
   });
-  backend.on("error", (err) => {
+
+  proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
+    socket.write("HTTP/1.1 101 Switching Protocols\r\n");
+    for (const [k, v] of Object.entries(proxyRes.headers)) {
+      const val = Array.isArray(v) ? v.join(", ") : v;
+      socket.write(`${k}: ${val}\r\n`);
+    }
+    socket.write("\r\n");
+    if (proxyHead && proxyHead.length) socket.write(proxyHead);
+    if (head && head.length) proxySocket.write(head);
+
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
+    proxySocket.on("error", () => { try { socket.destroy(); } catch (_) { } });
+    socket.on("error", () => { try { proxySocket.destroy(); } catch (_) { } });
+    socket.on("close", () => { try { proxySocket.destroy(); } catch (_) { } });
+  });
+
+  proxyReq.on("error", (err) => {
     console.error("[vnc ws bridge]", err.message);
     try { socket.destroy(); } catch (_) { }
   });
-  socket.on("error", () => { try { backend.destroy(); } catch (_) { } });
-  socket.on("close", () => { try { backend.destroy(); } catch (_) { } });
+
+  proxyReq.end();
 });
 
+// ─── boot ───────────────────────────────────────────────────
 const port = process.env.PORT || config.server.port || 3000;
 const host = process.env.PORT ? "0.0.0.0" : (config.server.host || "127.0.0.1");
 
-server.listen(port, host, () => {
+server.listen(port, host, async () => {
   console.log(`[ixl-server] http://${host}:${port}`);
   console.log(`[ixl-server] VNC at /vnc/vnc.html`);
-  // start the CDP injection watcher
-  ensureInjected("/app/chromium-ext/content.js").catch(e => console.error("[inject]", e.message));
+
+  try {
+    await loadSecrets();
+    console.log(`[ixl-server] secrets loaded`);
+  } catch (err) {
+    console.error("[ixl-server] secrets load failed:", err.message);
+  }
+
+  try {
+    await ensureInjected("/app/chromium-ext/content.js");
+    console.log(`[ixl-server] inject watcher started`);
+  } catch (err) {
+    console.error("[ixl-server] inject failed:", err.message);
+  }
 });
