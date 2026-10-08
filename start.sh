@@ -26,37 +26,23 @@ if [ ! -d "/data" ]; then
 fi
 mkdir -p "$PROFILE_DIR"
 
-SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
-
-# ─── read proxy URL from supabase ─────────────────────────
-echo "[start] reading proxy from supabase..."
-PROXY_URL=$(node /app/lib/proxy-boot.js 2>/dev/null || echo "")
-
+# ─── proxy ─────────────────────────────────────────────
+PROXY_ARGS=""
 if [ -n "$PROXY_URL" ]; then
-  echo "[start] proxy: found, starting forwarder..."
-  node -e "
-    import('./lib/proxy-forwarder.js').then(async (m) => {
-      await m.startProxyForwarder(process.env.PROXY_URL);
-      console.log('[proxy] ready');
-    }).catch(e => { console.error('[proxy]', e.message); process.exit(1); });
-  " &
-  PROXY_PID=$!
-  sleep 3
-
-  if kill -0 $PROXY_PID 2>/dev/null; then
-    echo "[start] proxy forwarder alive (pid $PROXY_PID)"
-    PROXY_ARGS="--proxy-server=http://127.0.0.1:8888 --proxy-bypass-list=<-loopback>"
-  else
-    echo "[start] proxy forwarder DIED, running direct"
-    PROXY_ARGS=""
-  fi
+  echo "[start] proxy configured: ${PROXY_URL%%@*}@***"
+  PROXY_ARGS="--proxy-server=$PROXY_URL"
+  # also need credentials in URL if present: --proxy-server=http://user:pass@host:port
 else
-  echo "[start] proxy: NONE (IXL will likely block datacenter IP)"
-  PROXY_ARGS=""
+  echo "[start] NO proxy configured (using Railway datacenter IP)"
 fi
 
+# optional: ignore proxy for localhost (so our /api/solve route still works)
+IGNORE_ARGS="--proxy-bypass-list=127.0.0.1;localhost"
+
+SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
+
 echo "[start] launching chrome..."
-PROXY_URL="$PROXY_URL" "$CHROME_BIN" \
+"$CHROME_BIN" \
   --no-sandbox \
   --disable-dev-shm-usage \
   --disable-blink-features=AutomationControlled \
@@ -82,6 +68,7 @@ PROXY_URL="$PROXY_URL" "$CHROME_BIN" \
   --remote-debugging-address=127.0.0.1 \
   --remote-allow-origins=* \
   $PROXY_ARGS \
+  $IGNORE_ARGS \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \
@@ -93,7 +80,7 @@ PROXY_URL="$PROXY_URL" "$CHROME_BIN" \
 echo "[start] chrome pid: $!"
 sleep 3
 echo "[start] chrome log:"
-cat /tmp/chrome.log 2>/dev/null | head -20
+cat /tmp/chrome.log 2>/dev/null | head -25
 
 echo "[start] launching node server..."
 node server.js
