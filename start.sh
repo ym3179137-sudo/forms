@@ -26,14 +26,31 @@ if [ ! -d "/data" ]; then
 fi
 mkdir -p "$PROFILE_DIR"
 
-# ─── proxy: ONLY apply if PROXY_URL is set ────────────────
+# ─── proxy parsing: strip credentials, pass host:port to chrome ───
 PROXY_ARGS=""
+PROXY_AUTH_USER=""
+PROXY_AUTH_PASS=""
+
 if [ -n "$PROXY_URL" ]; then
-  echo "[start] proxy configured"
-  PROXY_ARGS="--proxy-server=$PROXY_URL --proxy-bypass-list=127.0.0.1;localhost"
+  echo "[start] PROXY_URL detected, parsing..."
+  # match: scheme://user:pass@host:port
+  if [[ "$PROXY_URL" =~ ^([a-z0-9]+)://([^:@/]+):([^@/]+)@(.+)$ ]]; then
+    SCHEME="${BASH_REMATCH[1]}"
+    PROXY_AUTH_USER="${BASH_REMATCH[2]}"
+    PROXY_AUTH_PASS="${BASH_REMATCH[3]}"
+    HOSTPORT="${BASH_REMATCH[4]}"
+    PROXY_ARGS="--proxy-server=${SCHEME}://${HOSTPORT} --proxy-bypass-list=127.0.0.1;localhost"
+    echo "[start] proxy: ${SCHEME}://${HOSTPORT} (auth via CDP: user=${PROXY_AUTH_USER:0:3}***)"
+  else
+    PROXY_ARGS="--proxy-server=$PROXY_URL --proxy-bypass-list=127.0.0.1;localhost"
+    echo "[start] proxy (no auth): $PROXY_URL"
+  fi
 else
-  echo "[start] no proxy (using Railway IP)"
+  echo "[start] no proxy"
 fi
+
+export PROXY_AUTH_USER
+export PROXY_AUTH_PASS
 
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
