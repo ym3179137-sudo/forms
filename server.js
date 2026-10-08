@@ -3,12 +3,13 @@ import fs from "fs";
 import path from "path";
 import http from "http";
 import express from "express";
+import axios from "axios";
 import { fileURLToPath } from "url";
 import { login, verify, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
 import { getAnswer } from "./lib/answer-engine.js";
 import { lookupAnswer, saveAnswer, recordWrongAnswer } from "./lib/answer-cache.js";
 import { ensureInjected } from "./lib/inject.js";
-import { loadSecrets } from "./lib/keys.js";
+import { loadSecrets, getSecret } from "./lib/keys.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
@@ -16,7 +17,7 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "
 const app = express();
 app.use(express.json({ limit: "5mb" }));
 
-// CORS for the injected panel
+// CORS for the injected panels
 app.use("/api", (req, res, next) => {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Headers", "Content-Type, X-IXL-Token");
@@ -36,7 +37,7 @@ process.on("unhandledRejection", (err) => {
 });
 
 // ─── auth middleware ────────────────────────────────────────
-const OPEN_PATHS = new Set(["/api/health", "/api/login", "/api/solve", "/api/feedback"]);
+const OPEN_PATHS = new Set(["/api/health", "/api/login", "/api/solve", "/api/solve-form", "/api/feedback"]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
   if (req.path.startsWith("/vnc")) return next();
@@ -87,28 +88,21 @@ app.post("/api/ixl-creds", async (req, res) => {
   }
 });
 
-// ─── SOLVE ──────────────────────────────────────────────────
-// flow: DB lookup → if hit, return immediately (source: "cache")
-//       → if miss, research with multiple models + verifier
-//       → do NOT save yet — only save after IXL confirms it was correct
+// ─── SOLVE (IXL — single question) ─────────────────────────
 app.post("/api/solve", async (req, res) => {
   try {
     const q = req.body || {};
     if (!q.stem || q.stem.length < 3) return res.status(400).json({ error: "no stem" });
 
-    // 1) check database first
     const cached = await lookupAnswer(q).catch(() => null);
     if (cached) {
-      console.log("[solve] ⚡ cache hit — serving from database");
+      console.log("[solve] ⚡ cache hit");
       return res.json({ ...cached, source: "cache" });
     }
 
-    // 2) not in db → research
     console.log("[solve] cache miss — researching");
     const answer = await getAnswer(q, config);
-    console.log(`[solve] researched → source=${answer.source || "?"} conf=${answer.confidence} reasoning="${(answer.reasoning || "").slice(0, 100)}"`);
-
-    // do NOT save here — only save after IXL confirms correct
+    console.log(`[solve] researched → source=${answer.source || "?"} conf=${answer.confidence}`);
     res.json({ ...answer, source: answer.source || "ai" });
   } catch (err) {
     console.error("[solve] error:", err.message);
@@ -116,9 +110,97 @@ app.post("/api/solve", async (req, res) => {
   }
 });
 
-// called by the panel AFTER IXL submits and shows feedback
-// correct=true  → save the answer we sent as verified
-// correct=false → save IXL's correct-answer text as verified (learn from the mistake)
+// ─── SOLVE-FORM (Google Forms — batch) ─────────────────────
+app.post("/api/solve-form", async (req, res) => {
+  try {
+    const { questions } = req.body || {};
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: "no questions" });
+    }
+
+    console.log(`[solve-form] ${questions.length} questions`);
+
+    const lines = [];
+    lines.push("You are solving a Google Form. Answer every question below.");
+    lines.push("Return ONLY valid JSON matching the schema. No prose.");
+    lines.push("");
+    lines.push("Schema:");
+    lines.push('{"answers":[{"index":<n>,"type":"multiple_choice|checkbox|short_answer|paragraph|dropdown","answer_index":<int, for multiple_choice only>,"answer_indices":[<int>...], for checkbox only,"value":"<string, for short_answer/paragraph/dropdown>","confidence":<0-1>,"reasoning":"<short>"}]}');
+    lines.push("");
+    lines.push("Questions:");
+    for (const q of questions) {
+      lines.push(`--- Question index ${q.index} (${q.type}) ---`);
+      lines.push(q.title);
+      if (q.options && q.options.length) {
+        q.options.forEach((o, i) => lines.push(`  ${i}: ${o}`));
+      }
+    }
+
+    const userContent = lines.join("\n");
+
+    const geminiKey = await getSecret("GEMINI_API_KEY");
+    const groqKey = await getSecret("GROQ_API_KEY");
+    const openrouterKey = await getSecret("OPENROUTER_API_KEY");
+
+    const providers = [
+      { name: "gemini", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: geminiKey, jsonMode: false, models: ["gemini-flash-latest", "gemini-2.5-flash"] },
+      { name: "groq", baseURL: "https://api.groq.com/openai/v1", apiKey: groqKey, jsonMode: true, models: ["openai/gpt-oss-20b", "openai/gpt-oss-120b"] },
+      { name: "openrouter", baseURL: "https://openrouter.ai/api/v1", apiKey: openrouterKey, jsonMode: true, models: ["openrouter/free"] }
+    ];
+
+    const systemPrompt = `You solve Google Forms. For each question provide the correct answer.
+Use the exact schema. Never refuse. Never add prose outside the JSON.`;
+
+    let lastErr;
+    for (const p of providers) {
+      if (!p.apiKey || /PUT_|your_/i.test(p.apiKey)) continue;
+
+      for (const model of p.models) {
+        for (const withJson of [p.jsonMode, false]) {
+          try {
+            const body = {
+              model,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userContent }
+              ],
+              temperature: 0.15,
+              max_tokens: 4000
+            };
+            if (withJson) body.response_format = { type: "json_object" };
+
+            const r = await axios.post(p.baseURL.replace(/\/$/, "") + "/chat/completions", body, {
+              headers: { "Authorization": "Bearer " + p.apiKey, "Content-Type": "application/json" },
+              timeout: 40000,
+              validateStatus: (s) => s >= 200 && s < 500
+            });
+            if (r.status >= 400) throw new Error(`http ${r.status}: ${JSON.stringify(r.data).slice(0, 120)}`);
+
+            const raw = r.data?.choices?.[0]?.message?.content || "";
+            let s = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+            const a = s.indexOf("{"), b = s.lastIndexOf("}");
+            if (a >= 0 && b > a) s = s.slice(a, b + 1);
+            const parsed = JSON.parse(s);
+
+            const answers = Array.isArray(parsed) ? parsed : (parsed.answers || []);
+            console.log(`[solve-form] ✓ ${p.name}/${model} returned ${answers.length} answers`);
+            return res.json({ answers });
+          } catch (err) {
+            lastErr = err;
+            console.warn(`[solve-form] ✗ ${p.name}/${model}${withJson ? " (json)" : ""}: ${err.message.slice(0, 100)}`);
+          }
+        }
+      }
+    }
+
+    res.status(500).json({ error: "all providers failed. last: " + (lastErr?.message || "unknown") });
+  } catch (err) {
+    console.error("[solve-form]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── FEEDBACK (IXL only) ───────────────────────────────────
 app.post("/api/feedback", async (req, res) => {
   try {
     const { question, correct, correctAnswerText, appliedAnswer } = req.body || {};
@@ -126,15 +208,14 @@ app.post("/api/feedback", async (req, res) => {
 
     if (correct === true && appliedAnswer) {
       await saveAnswer(question, appliedAnswer, true).catch(() => { });
-      console.log(`[feedback] ✓ saved verified answer for "${(question.stem || "").slice(0, 40)}"`);
+      console.log(`[feedback] ✓ saved verified answer`);
     } else if (correct === false) {
       await recordWrongAnswer(question, appliedAnswer || question).catch(() => { });
-
       if (correctAnswerText) {
         const parsed = parseCorrectAnswerText(correctAnswerText, question);
         if (parsed) {
           await saveAnswer(question, parsed, true).catch(() => { });
-          console.log(`[feedback] ✓ saved CORRECTED answer "${correctAnswerText}" for "${(question.stem || "").slice(0, 40)}"`);
+          console.log(`[feedback] ✓ saved CORRECTED answer`);
         }
       }
     }
@@ -145,11 +226,9 @@ app.post("/api/feedback", async (req, res) => {
   }
 });
 
-// helper: convert IXL's "The correct answer is: X" into our answer schema
 function parseCorrectAnswerText(text, question) {
   const cleaned = String(text || "").trim();
   if (!cleaned) return null;
-
   if (question.type === "multiple_choice") {
     const opts = question.options || [];
     let idx = opts.findIndex(o => o.trim() === cleaned);
@@ -164,9 +243,7 @@ function parseCorrectAnswerText(text, question) {
     if (idx >= 0) return { type: "multiple_choice", answer_index: idx };
     return null;
   }
-  if (question.type === "fill_in") {
-    return { type: "fill_in", value: cleaned };
-  }
+  if (question.type === "fill_in") return { type: "fill_in", value: cleaned };
   return null;
 }
 
@@ -255,7 +332,7 @@ server.listen(port, host, async () => {
   }
 
   try {
-    await ensureInjected("/app/chromium-ext/content.js");
+    await ensureInjected();
     console.log(`[ixl-server] inject watcher started`);
   } catch (err) {
     console.error("[ixl-server] inject failed:", err.message);

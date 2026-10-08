@@ -15,7 +15,6 @@ body {
     overflow: hidden;
 }
 
-/* ─── login ───────────────────────────────────────────── */
 .login-wrap {
     display: flex;
     align-items: center;
@@ -31,6 +30,14 @@ body {
     border: 1px solid #1c2330;
     border-radius: 10px;
     padding: 28px;
+}
+
+.brand-logo {
+    display: block;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 14px;
+    border-radius: 12px;
 }
 
 h1 {
@@ -104,7 +111,6 @@ h1 {
     margin-top: 12px;
 }
 
-/* ─── browser shell ──────────────────────────────────── */
 .browser {
     display: flex;
     flex-direction: column;
@@ -113,49 +119,6 @@ h1 {
     background: #0c0f17;
 }
 
-/* thin top bar with IXL logo */
-.topbar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 12px;
-    background: #fff;
-    border-bottom: 1px solid #e5e7eb;
-    flex-shrink: 0;
-    height: 38px;
-}
-
-.ixl-logo {
-    font-family: Arial, Helvetica, sans-serif;
-    font-weight: 900;
-    font-size: 20px;
-    letter-spacing: -1px;
-    display: inline-flex;
-    align-items: baseline;
-    line-height: 1;
-}
-
-.ixl-i {
-    color: #1c4980;
-}
-
-.ixl-x {
-    color: #f5a623;
-}
-
-.ixl-l {
-    color: #7ac143;
-}
-
-.topbar-title {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    font-size: 13px;
-    color: #333;
-    font-weight: 500;
-    letter-spacing: 0.3px;
-}
-
-/* full-screen VNC area */
 .viewport {
     flex: 1;
     min-height: 0;
@@ -174,7 +137,6 @@ h1 {
     flex: 1;
 }
 
-/* ─── panic overlay (ctrl+M) ─────────────────────────── */
 .panic-overlay {
     position: fixed;
     inset: 0;
@@ -212,7 +174,6 @@ h1 {
     width: 40%;
 }
 
-/* ─── IXL creds modal ────────────────────────────────── */
 .ixl-modal {
     position: fixed;
     inset: 0;
@@ -308,12 +269,4 @@ h1 {
 
 .ixl-modal-actions button:hover {
     filter: brightness(1.1);
-}
-
-.brand-logo {
-    display: block;
-    width: 56px;
-    height: 56px;
-    margin-bottom: 14px;
-    border-radius: 12px;
 }

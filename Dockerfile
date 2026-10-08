@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y \
     novnc websockify \
     && rm -rf /var/lib/apt/lists/*
 
-# install REAL Google Chrome (not Chrome for Testing)
 RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
     && apt-get install -y /tmp/chrome.deb \

@@ -1,8 +1,7 @@
 {
     "manifest_version": 3,
-    "name": "IXL Solver",
+    "name": "Solver",
     "version": "1.0.0",
-    "description": "auto-solve panel for IXL",
     "content_scripts": [
         {
             "matches": [
@@ -14,8 +13,18 @@
             "css": [
                 "panel.css"
             ],
-            "run_at": "document_idle",
-            "all_frames": false
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://docs.google.com/forms/*",
+                "https://forms.gle/*"
+            ],
+            "js": [
+                "forms.js",
+                "panel.css"
+            ],
+            "run_at": "document_idle"
         }
     ],
     "permissions": [

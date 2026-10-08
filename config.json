@@ -3,54 +3,25 @@
         "port": 3000,
         "host": "127.0.0.1"
     },
-    "providers": [
-        {
-            "name": "gemini",
-            "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai",
-            "apiKeyEnv": "GEMINI_API_KEY",
-            "jsonMode": false,
-            "supportsVision": true,
-            "models": [
-                "gemini-flash-latest",
-                "gemini-flash-lite-latest"
-            ]
-        },
-        {
-            "name": "groq",
-            "baseURL": "https://api.groq.com/openai/v1",
-            "apiKeyEnv": "GROQ_API_KEY",
-            "jsonMode": true,
-            "supportsVision": false,
-            "models": [
-                "openai/gpt-oss-20b",
-                "openai/gpt-oss-120b"
-            ]
-        },
-        {
-            "name": "openrouter",
-            "baseURL": "https://openrouter.ai/api/v1",
-            "apiKeyEnv": "OPENROUTER_API_KEY",
-            "jsonMode": true,
-            "supportsVision": true,
-            "models": [
-                "openrouter/free"
-            ]
-        }
-    ],
-    "temperature": 0.2,
-    "maxTokens": 800,
+    "openrouter": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "textModels": [
+            "openrouter/free",
+            "nvidia/nemotron-3-super-120b-a12b:free"
+        ],
+        "visionModels": [
+            "qwen/qwen-2-vl-7b-instruct:free",
+            "meta-llama/llama-3.2-11b-vision-instruct:free"
+        ],
+        "temperature": 0.2,
+        "maxTokens": 800
+    },
     "behavior": {
-        "answerDelayMin": 50,
-        "answerDelayMax": 150
+        "answerDelayMin": 200,
+        "answerDelayMax": 500
     },
     "panel": {
         "title": "notes",
         "defaultHidden": false
-    },
-    "steel": {
-        "useProxy": false,
-        "solveCaptcha": false,
-        "timeout": 900000,
-        "inactivityTimeout": 600000
     }
 }
