@@ -112,8 +112,6 @@
     if (window.__ixl_panel_injected__) return;
     window.__ixl_panel_injected__ = true;
 
-    // relative URL → resolves to ixl.com/api/solve (same-origin, CSP-safe)
-    // Playwright intercepts before it reaches ixl's server
     const API_BASE = "";
 
     let token = "";
@@ -315,8 +313,9 @@
     }
 
     async function askBackend(question) {
+        const t0 = Date.now();
         const controller = new AbortController();
-        const to = setTimeout(() => controller.abort(), 25000);
+        const to = setTimeout(() => controller.abort(), 60000);
         try {
             const res = await fetch(`${API_BASE}/api/solve`, {
                 method: "POST",
@@ -324,11 +323,14 @@
                 body: JSON.stringify(question),
                 signal: controller.signal
             });
+            const ms = Date.now() - t0;
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `http ${res.status}`);
+                throw new Error(`${err.error || "http " + res.status} (${ms}ms)`);
             }
-            return await res.json();
+            const data = await res.json();
+            console.log(`[solve] answered in ${ms}ms`);
+            return data;
         } finally {
             clearTimeout(to);
         }
@@ -366,6 +368,9 @@
                 return;
             }
 
+            // mark this question as in-flight so we don't re-send if the fetch hangs
+            lastAnsweredSig = sig;
+
             setStatus(`thinking (${q.type})`);
             pushLog(`q[${q.type}] ${q.stem.slice(0, 50)}`);
 
@@ -377,8 +382,9 @@
             } catch (err) {
                 pushLog("✗ " + err.message, "err");
                 setStatus("error");
+                lastAnsweredSig = "";
                 busy = false;
-                setTimeout(loop, 2000);
+                setTimeout(loop, 3000);
                 return;
             }
 
@@ -390,6 +396,7 @@
 
             if (!ok) {
                 pushLog("✗ could not apply", "err");
+                lastAnsweredSig = "";
                 busy = false;
                 setTimeout(loop, 1200);
                 return;
@@ -397,7 +404,6 @@
 
             await new Promise(r => setTimeout(r, 800));
             clickSubmit();
-            lastAnsweredSig = sig;
 
             await new Promise(r => setTimeout(r, 2500));
             const text = document.body.innerText || "";
