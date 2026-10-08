@@ -18,13 +18,23 @@ async function tryLogin(u, p) {
 
 async function loadIxlCreds() {
   try {
+    const cached = localStorage.getItem("__ixl_creds_" + username);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed.email && parsed.password) return { ...parsed, has: true };
+    }
     const res = await fetch("/api/ixl-creds", { headers: { "X-IXL-Token": token } });
     if (!res.ok) return null;
-    return await res.json();
+    const data = await res.json();
+    if (data.has) localStorage.setItem("__ixl_creds_" + username, JSON.stringify(data));
+    return data;
   } catch (_) { return null; }
 }
 
 async function saveIxlCreds(email, password) {
+  try {
+    localStorage.setItem("__ixl_creds_" + username, JSON.stringify({ email, password }));
+  } catch (_) { }
   try {
     const res = await fetch("/api/ixl-creds", {
       method: "POST",
@@ -35,14 +45,65 @@ async function saveIxlCreds(email, password) {
   } catch (_) { return { ok: false }; }
 }
 
+// inject CSS into the noVNC iframe to hide its sidebar and status UI
+function injectNoVncCleanup() {
+  const frame = el("vnc-frame");
+  if (!frame) return;
+  try {
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    if (doc.getElementById("__ixl_hide_ui")) return;
+    const s = doc.createElement("style");
+    s.id = "__ixl_hide_ui";
+    s.textContent = `
+      /* hide noVNC sidebar + status + handle */
+      #noVNC_control_bar_anchor,
+      #noVNC_control_bar,
+      #noVNC_control_bar_handle,
+      .noVNC_control_bar_anchor,
+      #noVNC_status,
+      #noVNC_screen .noVNC_status_bar,
+      .noVNC_panel,
+      #noVNC_connect_button,
+      #noVNC_disconnect_button,
+      #noVNC_clipboard_button,
+      #noVNC_settings_button,
+      #noVNC_fullscreen_button,
+      #noVNC_view_drag_button,
+      #noVNC_mobile_buttons,
+      #noVNC_transition { display: none !important; visibility: hidden !important; opacity: 0 !important; }
+
+      /* make the screen fill 100% */
+      #noVNC_screen { padding: 0 !important; margin: 0 !important; }
+      #noVNC_container, #noVNC_canvas { margin: 0 !important; padding: 0 !important; }
+    `;
+    (doc.head || doc.documentElement).appendChild(s);
+  } catch (_) { }
+}
+
+function startIframeWatch() {
+  const frame = el("vnc-frame");
+  if (!frame) return;
+  frame.addEventListener("load", () => {
+    injectNoVncCleanup();
+    setTimeout(injectNoVncCleanup, 500);
+    setTimeout(injectNoVncCleanup, 1500);
+    setTimeout(injectNoVncCleanup, 3000);
+  });
+  // also poll every 2s in case noVNC re-renders its UI
+  setInterval(injectNoVncCleanup, 2000);
+}
+
 function launch() {
   if (launched) return;
   launched = true;
   if (el("screen-login")) el("screen-login").hidden = true;
   if (el("screen-session")) el("screen-session").hidden = false;
+
   const frame = el("vnc-frame");
   if (frame) {
-    frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&scale=1&view_clip=0&path=vnc/websockify&reconnect=1&reconnect_delay=500&show_dot=0&compression=4&quality=8&view_only=0&toolbar=0&shared=1";
+    frame.src = "/vnc/vnc.html?autoconnect=1&resize=scale&scale=1&view_clip=0&path=vnc/websockify&reconnect=1&reconnect_delay=500&show_dot=0&compression=4&quality=8&view_only=0&shared=1";
+    startIframeWatch();
   }
 }
 
@@ -75,11 +136,8 @@ on("login-submit", "click", async () => {
     localStorage.setItem("ixl_user", username);
 
     const creds = await loadIxlCreds();
-    if (creds && creds.has) {
-      launch();
-    } else {
-      openIxlModal(creds || null);
-    }
+    if (creds && creds.has) launch();
+    else openIxlModal(creds || null);
   } catch (err) {
     if (el("error-box")) { el("error-box").hidden = false; el("error-box").textContent = err.message; }
     if (el("boot-msg")) el("boot-msg").textContent = "sign in to continue.";
@@ -100,47 +158,11 @@ on("ixl-save", "click", async () => {
   launch();
 });
 
-on("ixl-skip", "click", () => {
-  closeIxlModal();
-  launch();
-});
+on("ixl-skip", "click", () => { closeIxlModal(); launch(); });
 
-on("back-btn", "click", () => {
-  if (el("screen-session")) el("screen-session").hidden = true;
-  if (el("screen-login")) el("screen-login").hidden = false;
-  const frame = el("vnc-frame");
-  if (frame) frame.src = "";
-  launched = false;
-});
-
-on("fs-btn", "click", () => {
-  const target = el("viewer-wrap") || document.documentElement;
-  if (!document.fullscreenElement) target.requestFullscreen().catch(() => { });
-  else document.exitFullscreen().catch(() => { });
-});
-
-on("ixl-login-btn", "click", () => {
-  const email = el("ixl-email")?.value.trim() || "";
-  const password = el("ixl-pass")?.value || "";
-  if (!email || !password) { openIxlModal(); return; }
-  openIxlModal({ email, password });
-});
-
-// nav bar stubs
-on("nav-back", "click", () => { });
-on("nav-forward", "click", () => { });
-on("nav-reload", "click", () => {
-  const frame = el("vnc-frame");
-  if (frame) {
-    const url = frame.src;
-    frame.src = "";
-    setTimeout(() => { frame.src = url; }, 100);
-  }
-});
-
-// panic mode: Ctrl+M
+// panic mode via Ctrl+M on the parent page
 window.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && (e.key === "m" || e.key === "M")) {
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "m" || e.key === "M")) {
     e.preventDefault(); e.stopPropagation();
     const o = el("panic-overlay");
     if (o) o.hidden = !o.hidden;
