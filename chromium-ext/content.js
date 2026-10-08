@@ -1,11 +1,8 @@
 (function () {
-    // ─── anti-detect + stealth patches (run before anything) ──
+    // ─── anti-detect + stealth patches ─────────────────────
     (function stealth() {
         try {
-            // webdriver
             Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-
-            // languages + platform
             Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
             Object.defineProperty(navigator, "language", { get: () => "en-US" });
             Object.defineProperty(navigator, "platform", { get: () => "Win32" });
@@ -14,7 +11,6 @@
             Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
             Object.defineProperty(navigator, "maxTouchPoints", { get: () => 0 });
 
-            // plugins (real Chrome has these)
             Object.defineProperty(navigator, "plugins", {
                 get: () => {
                     const arr = [
@@ -31,7 +27,6 @@
                 }
             });
 
-            // mimeTypes
             Object.defineProperty(navigator, "mimeTypes", {
                 get: () => {
                     const arr = [
@@ -44,7 +39,6 @@
                 }
             });
 
-            // chrome object with all expected props
             if (!window.chrome) window.chrome = {};
             if (!window.chrome.runtime) window.chrome.runtime = {};
             if (!window.chrome.loadTimes) window.chrome.loadTimes = () => ({
@@ -62,8 +56,7 @@
                 RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" }
             };
 
-            // permissions query — spoof notification state
-            const origQuery = navigator.permissions?.query?.bind(navigator.permissions);
+            const origQuery = navigator.permissions && navigator.permissions.query ? navigator.permissions.query.bind(navigator.permissions) : null;
             if (origQuery) {
                 navigator.permissions.query = (params) =>
                     params.name === "notifications"
@@ -71,7 +64,6 @@
                         : origQuery(params);
             }
 
-            // WebGL vendor/renderer spoof (hide SwiftShader)
             const patchGL = function (orig) {
                 return function (param) {
                     if (param === 37445) return "Google Inc. (NVIDIA)";
@@ -79,16 +71,13 @@
                     return orig.apply(this, arguments);
                 };
             };
-            if (window.WebGLRenderingContext) {
-                const p = WebGLRenderingContext.prototype;
-                if (p.getParameter) p.getParameter = patchGL(p.getParameter);
+            if (window.WebGLRenderingContext && WebGLRenderingContext.prototype.getParameter) {
+                WebGLRenderingContext.prototype.getParameter = patchGL(WebGLRenderingContext.prototype.getParameter);
             }
-            if (window.WebGL2RenderingContext) {
-                const p2 = WebGL2RenderingContext.prototype;
-                if (p2.getParameter) p2.getParameter = patchGL(p2.getParameter);
+            if (window.WebGL2RenderingContext && WebGL2RenderingContext.prototype.getParameter) {
+                WebGL2RenderingContext.prototype.getParameter = patchGL(WebGL2RenderingContext.prototype.getParameter);
             }
 
-            // canvas noise (breaks canvas fingerprint)
             const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
             HTMLCanvasElement.prototype.toDataURL = function (...args) {
                 try {
@@ -101,14 +90,7 @@
                 } catch (_) { }
                 return origToDataURL.apply(this, args);
             };
-            const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-            CanvasRenderingContext2D.prototype.getImageData = function (...args) {
-                const img = origGetImageData.apply(this, args);
-                try { for (let i = 0; i < img.data.length; i += 400) img.data[i] ^= 1; } catch (_) { }
-                return img;
-            };
 
-            // audio fingerprint noise
             if (window.AudioBuffer) {
                 const origGetChannelData = AudioBuffer.prototype.getChannelData;
                 AudioBuffer.prototype.getChannelData = function (...args) {
@@ -117,58 +99,23 @@
                     return data;
                 };
             }
-            if (window.AnalyserNode) {
-                const origGetFloatFreq = AnalyserNode.prototype.getFloatFrequencyData;
-                AnalyserNode.prototype.getFloatFrequencyData = function (arr) {
-                    origGetFloatFreq.call(this, arr);
-                    try { for (let i = 0; i < arr.length; i += 100) arr[i] += (Math.random() - 0.5) * 1e-3; } catch (_) { }
-                };
-            }
 
-            // battery api
             Object.defineProperty(navigator, "getBattery", {
                 get: () => () => Promise.resolve({
                     charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1
                 })
             });
-
-            // notification permission state
-            Object.defineProperty(Notification, "permission", { get: () => "default" });
-
-            // hide automation flags
-            if (window.navigator.connection) {
-                Object.defineProperty(navigator.connection, "rtt", { get: () => 50 });
-                Object.defineProperty(navigator.connection, "downlink", { get: () => 10 });
-                Object.defineProperty(navigator.connection, "effectiveType", { get: () => "4g" });
-            }
-
-            // timezone + date
-            const origResolved = Intl.DateTimeFormat.prototype.resolvedOptions;
-            Intl.DateTimeFormat.prototype.resolvedOptions = function () {
-                const opts = origResolved.call(this);
-                opts.timeZone = "America/New_York";
-                return opts;
-            };
-
-            // iframe contentWindow.navigator — steal parent's (already patched) references
-            try {
-                const origIframeNav = HTMLIFrameElement.prototype.__lookupGetter__("contentWindow");
-                if (origIframeNav) {
-                    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
-                        get() { return origIframeNav.call(this); }
-                    });
-                }
-            } catch (_) { }
-
-        } catch (e) { /* silent */ }
+        } catch (_) { }
     })();
 
-    // ─── panel + parser ────────────────────────────────────────
+    // ─── panel + auto-solve ────────────────────────────────
     if (window.__ixl_panel_injected__) return;
     window.__ixl_panel_injected__ = true;
-    // the URL here is a marker the Playwright route interceptor matches on
-    // it never leaves the browser — Playwright forwards it to the real backend
-    const API_BASE = "https://ixl-api.local";
+
+    // relative URL → resolves to ixl.com/api/solve (same-origin, CSP-safe)
+    // Playwright intercepts before it reaches ixl's server
+    const API_BASE = "";
+
     let token = "";
     try {
         const m = location.search.match(/[?&]ixl_solver_token=([^&]+)/);
@@ -181,7 +128,7 @@
     } catch (_) { }
 
     const css = `
-    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 300px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
+    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 320px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
     #__ixl_panel.__hidden { display: none !important; }
     #__ixl_panel .__ixl_header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     #__ixl_panel .__ixl_title { font-weight: 600; color: #8ab4ff; letter-spacing: 0.5px; }
