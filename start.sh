@@ -26,18 +26,14 @@ if [ ! -d "/data" ]; then
 fi
 mkdir -p "$PROFILE_DIR"
 
-# ─── proxy ─────────────────────────────────────────────
+# ─── proxy: ONLY apply if PROXY_URL is set ────────────────
 PROXY_ARGS=""
 if [ -n "$PROXY_URL" ]; then
-  echo "[start] proxy configured: ${PROXY_URL%%@*}@***"
-  PROXY_ARGS="--proxy-server=$PROXY_URL"
-  # also need credentials in URL if present: --proxy-server=http://user:pass@host:port
+  echo "[start] proxy configured"
+  PROXY_ARGS="--proxy-server=$PROXY_URL --proxy-bypass-list=127.0.0.1;localhost"
 else
-  echo "[start] NO proxy configured (using Railway datacenter IP)"
+  echo "[start] no proxy (using Railway IP)"
 fi
-
-# optional: ignore proxy for localhost (so our /api/solve route still works)
-IGNORE_ARGS="--proxy-bypass-list=127.0.0.1;localhost"
 
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
@@ -68,7 +64,6 @@ echo "[start] launching chrome..."
   --remote-debugging-address=127.0.0.1 \
   --remote-allow-origins=* \
   $PROXY_ARGS \
-  $IGNORE_ARGS \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \
