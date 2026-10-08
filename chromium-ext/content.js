@@ -107,7 +107,6 @@
         else { token = sessionStorage.getItem("__ixl_tok") || ""; }
     } catch (_) { }
 
-    // ─── per-user prefs (max wrong only) ────────────────────
     const PREFS_KEY = "__ixl_prefs_v2";
     const defaultPrefs = { maxWrong: 0 };
     function getPrefs() {
@@ -122,7 +121,7 @@
     }
 
     const css = `
-    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 340px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
+    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 360px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
     #__ixl_panel.__hidden { display: none !important; }
     #__ixl_panel .__ixl_header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     #__ixl_panel .__ixl_title { font-weight: 600; color: #8ab4ff; letter-spacing: 0.5px; }
@@ -139,6 +138,7 @@
     #__ixl_panel .__ixl_log .ok { color: #6d8; }
     #__ixl_panel .__ixl_log .err { color: #d67; }
     #__ixl_panel .__ixl_log .warn { color: #fc6; }
+    #__ixl_panel .__ixl_log .hit { color: #fc6; font-weight: 600; }
   `;
 
     let running = false;
@@ -430,6 +430,16 @@
         }
     }
 
+    async function reportFeedback(question, correct, correctAnswerText, appliedAnswer) {
+        try {
+            await fetch(`${API_BASE}/api/feedback`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-IXL-Token": token },
+                body: JSON.stringify({ question, correct, correctAnswerText, appliedAnswer })
+            });
+        } catch (_) { }
+    }
+
     function dismissFeedback() {
         const btns = Array.from(document.querySelectorAll("button"));
         const m = btns.find(b => /^(got it|continue|next|okay|ok)$/i.test((b.innerText || "").trim()) && !b.disabled);
@@ -437,7 +447,6 @@
     }
 
     function thinkDelay() {
-        // fixed 5s before answering each question
         return new Promise(r => setTimeout(r, 5000));
     }
 
@@ -479,9 +488,17 @@
                 return;
             }
 
+            const src = answer.source || "ai";
             const conf = typeof answer.confidence === "number" ? answer.confidence : null;
             const confStr = conf !== null ? ` conf=${conf.toFixed(2)}` : "";
-            pushLog(`ai → ${JSON.stringify(answer).slice(0, 70)}${confStr}`, conf !== null && conf < 0.6 ? "warn" : "ok");
+            const tag = src === "cache" ? "⚡ DB" : src === "unanimous" ? "✓ unanimous" : src === "verifier" ? "✓ verified" : "ai";
+
+            if (src === "cache") {
+                pushLog(`${tag} → ${JSON.stringify(answer).slice(0, 60)}`, "hit");
+            } else {
+                pushLog(`${tag} → ${JSON.stringify(answer).slice(0, 60)}${confStr}`, conf !== null && conf < 0.6 ? "warn" : "ok");
+            }
+            if (answer.reasoning) pushLog(`  ↳ ${answer.reasoning.slice(0, 80)}`);
 
             let ok = false;
             if (answer.type === "multiple_choice") ok = applyMultipleChoice(q, answer);
@@ -505,9 +522,16 @@
 
             await new Promise(r => setTimeout(r, 2500));
             const text = document.body.innerText || "";
+            let correctText = "";
+
             if (/sorry,\s*incorrect/i.test(text) || /the correct answer is/i.test(text)) {
+                const m = text.match(/the correct answer is:?\s*([^\n]+)/i);
+                correctText = m ? m[1].trim().slice(0, 200) : "";
                 wrongCount++;
                 pushLog(`✗ wrong (${wrongCount}/${currentPrefs.maxWrong || "∞"})`, "err");
+
+                reportFeedback(q, false, correctText, answer).catch(() => { });
+
                 lastAnsweredSig = "";
                 dismissFeedback();
 
@@ -521,10 +545,11 @@
                     return;
                 }
             } else if (/(correct!|nice work|good job|great job|well done)/i.test(text)) {
-                pushLog("✓ correct", "ok");
+                pushLog("✓ correct — saved to database", "ok");
                 setStatus("correct");
+                reportFeedback(q, true, "", answer).catch(() => { });
             } else {
-                pushLog("? feedback unclear");
+                pushLog("? feedback unclear — not saving");
             }
 
             await new Promise(r => setTimeout(r, 900));

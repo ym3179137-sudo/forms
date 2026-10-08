@@ -88,40 +88,87 @@ app.post("/api/ixl-creds", async (req, res) => {
 });
 
 // ─── SOLVE ──────────────────────────────────────────────────
+// flow: DB lookup → if hit, return immediately (source: "cache")
+//       → if miss, research with multiple models + verifier
+//       → do NOT save yet — only save after IXL confirms it was correct
 app.post("/api/solve", async (req, res) => {
   try {
     const q = req.body || {};
     if (!q.stem || q.stem.length < 3) return res.status(400).json({ error: "no stem" });
 
+    // 1) check database first
     const cached = await lookupAnswer(q).catch(() => null);
     if (cached) {
-      console.log("[solve] cache hit");
-      return res.json(cached);
+      console.log("[solve] ⚡ cache hit — serving from database");
+      return res.json({ ...cached, source: "cache" });
     }
 
+    // 2) not in db → research
+    console.log("[solve] cache miss — researching");
     const answer = await getAnswer(q, config);
-    console.log("[solve] ai →", JSON.stringify(answer).slice(0, 120));
-    res.json(answer);
+    console.log(`[solve] researched → source=${answer.source || "?"} conf=${answer.confidence} reasoning="${(answer.reasoning || "").slice(0, 100)}"`);
+
+    // do NOT save here — only save after IXL confirms correct
+    res.json({ ...answer, source: answer.source || "ai" });
   } catch (err) {
     console.error("[solve] error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// called by the panel AFTER IXL submits and shows feedback
+// correct=true  → save the answer we sent as verified
+// correct=false → save IXL's correct-answer text as verified (learn from the mistake)
 app.post("/api/feedback", async (req, res) => {
   try {
-    const { question, correct, correctAnswerText } = req.body || {};
+    const { question, correct, correctAnswerText, appliedAnswer } = req.body || {};
     if (!question) return res.status(400).json({ error: "no question" });
-    if (correct === true) {
-      await saveAnswer(question, question._answer || {}, true).catch(() => { });
-    } else {
-      await recordWrongAnswer(question, question).catch(() => { });
+
+    if (correct === true && appliedAnswer) {
+      await saveAnswer(question, appliedAnswer, true).catch(() => { });
+      console.log(`[feedback] ✓ saved verified answer for "${(question.stem || "").slice(0, 40)}"`);
+    } else if (correct === false) {
+      await recordWrongAnswer(question, appliedAnswer || question).catch(() => { });
+
+      if (correctAnswerText) {
+        const parsed = parseCorrectAnswerText(correctAnswerText, question);
+        if (parsed) {
+          await saveAnswer(question, parsed, true).catch(() => { });
+          console.log(`[feedback] ✓ saved CORRECTED answer "${correctAnswerText}" for "${(question.stem || "").slice(0, 40)}"`);
+        }
+      }
     }
     res.json({ ok: true });
   } catch (err) {
+    console.error("[feedback]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// helper: convert IXL's "The correct answer is: X" into our answer schema
+function parseCorrectAnswerText(text, question) {
+  const cleaned = String(text || "").trim();
+  if (!cleaned) return null;
+
+  if (question.type === "multiple_choice") {
+    const opts = question.options || [];
+    let idx = opts.findIndex(o => o.trim() === cleaned);
+    if (idx >= 0) return { type: "multiple_choice", answer_index: idx };
+    const lc = cleaned.toLowerCase();
+    idx = opts.findIndex(o => o.trim().toLowerCase() === lc);
+    if (idx >= 0) return { type: "multiple_choice", answer_index: idx };
+    idx = opts.findIndex(o => {
+      const t = o.trim().toLowerCase();
+      return t.includes(lc) || lc.includes(t);
+    });
+    if (idx >= 0) return { type: "multiple_choice", answer_index: idx };
+    return null;
+  }
+  if (question.type === "fill_in") {
+    return { type: "fill_in", value: cleaned };
+  }
+  return null;
+}
 
 // ─── VNC proxy ──────────────────────────────────────────────
 app.get("/vnc/package.json", (req, res) => res.json({ name: "novnc", version: "1.5.0" }));
