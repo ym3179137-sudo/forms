@@ -309,3 +309,11 @@ h1 {
 .ixl-modal-actions button:hover {
     filter: brightness(1.1);
 }
+
+.brand-logo {
+    display: block;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 14px;
+    border-radius: 12px;
+}
