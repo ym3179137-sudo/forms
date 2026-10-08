@@ -1,112 +1,15 @@
 (function () {
-    // ─── anti-detect + stealth patches ─────────────────────
-    (function stealth() {
-        try {
-            Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-            Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
-            Object.defineProperty(navigator, "language", { get: () => "en-US" });
-            Object.defineProperty(navigator, "platform", { get: () => "Win32" });
-            Object.defineProperty(navigator, "vendor", { get: () => "Google Inc." });
-            Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
-            Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
-            Object.defineProperty(navigator, "maxTouchPoints", { get: () => 0 });
-
-            Object.defineProperty(navigator, "plugins", {
-                get: () => {
-                    const arr = [
-                        { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-                        { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-                        { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-                        { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 },
-                        { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format", length: 1 }
-                    ];
-                    arr.item = (i) => arr[i];
-                    arr.namedItem = (n) => arr.find(p => p.name === n);
-                    arr.refresh = () => { };
-                    return arr;
-                }
-            });
-
-            Object.defineProperty(navigator, "mimeTypes", {
-                get: () => {
-                    const arr = [
-                        { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format" },
-                        { type: "text/pdf", suffixes: "pdf", description: "Portable Document Format" }
-                    ];
-                    arr.item = (i) => arr[i];
-                    arr.namedItem = (n) => arr.find(m => m.type === n);
-                    return arr;
-                }
-            });
-
-            if (!window.chrome) window.chrome = {};
-            if (!window.chrome.runtime) window.chrome.runtime = {};
-            if (!window.chrome.loadTimes) window.chrome.loadTimes = () => ({
-                requestTime: 0, startLoadTime: 0, commitLoadTime: 0,
-                finishDocumentLoadTime: 0, finishLoadTime: 0, firstPaintTime: 0,
-                firstPaintAfterLoadTime: 0, navigationType: "Other",
-                wasFetchedViaSpdy: false, wasNpnNegotiated: false,
-                npnNegotiatedProtocol: "unknown", wasAlternateProtocolAvailable: false,
-                connectionInfo: "http/1.1"
-            });
-            if (!window.chrome.csi) window.chrome.csi = () => ({ startE: 0, onloadT: 0, pageT: 0, tran: 15 });
-            if (!window.chrome.app) window.chrome.app = {
-                isInstalled: false,
-                InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
-                RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" }
-            };
-
-            const origQuery = navigator.permissions && navigator.permissions.query ? navigator.permissions.query.bind(navigator.permissions) : null;
-            if (origQuery) {
-                navigator.permissions.query = (params) =>
-                    params.name === "notifications"
-                        ? Promise.resolve({ state: Notification.permission, onchange: null })
-                        : origQuery(params);
-            }
-
-            const patchGL = function (orig) {
-                return function (param) {
-                    if (param === 37445) return "Google Inc. (NVIDIA)";
-                    if (param === 37446) return "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
-                    return orig.apply(this, arguments);
-                };
-            };
-            if (window.WebGLRenderingContext && WebGLRenderingContext.prototype.getParameter) {
-                WebGLRenderingContext.prototype.getParameter = patchGL(WebGLRenderingContext.prototype.getParameter);
-            }
-            if (window.WebGL2RenderingContext && WebGL2RenderingContext.prototype.getParameter) {
-                WebGL2RenderingContext.prototype.getParameter = patchGL(WebGL2RenderingContext.prototype.getParameter);
-            }
-
-            const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-            HTMLCanvasElement.prototype.toDataURL = function (...args) {
-                try {
-                    const ctx = this.getContext("2d");
-                    if (ctx) {
-                        const img = ctx.getImageData(0, 0, this.width, this.height);
-                        for (let i = 0; i < img.data.length; i += 400) img.data[i] ^= 1;
-                        ctx.putImageData(img, 0, 0);
-                    }
-                } catch (_) { }
-                return origToDataURL.apply(this, args);
-            };
-
-            if (window.AudioBuffer) {
-                const origGetChannelData = AudioBuffer.prototype.getChannelData;
-                AudioBuffer.prototype.getChannelData = function (...args) {
-                    const data = origGetChannelData.apply(this, args);
-                    try { for (let i = 0; i < data.length; i += 1000) data[i] += (Math.random() - 0.5) * 1e-7; } catch (_) { }
-                    return data;
-                };
-            }
-
-            Object.defineProperty(navigator, "getBattery", {
-                get: () => () => Promise.resolve({
-                    charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1
-                })
-            });
-        } catch (_) { }
-    })();
+    // ─── MINIMAL anti-detect ───────────────────────────────
+    // only patches that don't break IXL's own JS
+    try {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+        Object.defineProperty(navigator, "language", { get: () => "en-US" });
+        Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+        Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+        Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+        if (!window.chrome) window.chrome = { runtime: {} };
+    } catch (_) { }
 
     // ─── panel + auto-solve ────────────────────────────────
     if (window.__ixl_panel_injected__) return;
@@ -126,7 +29,7 @@
     } catch (_) { }
 
     const css = `
-    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 320px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
+    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 340px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
     #__ixl_panel.__hidden { display: none !important; }
     #__ixl_panel .__ixl_header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     #__ixl_panel .__ixl_title { font-weight: 600; color: #8ab4ff; letter-spacing: 0.5px; }
@@ -134,10 +37,11 @@
     #__ixl_panel .__ixl_toggle { width: 100%; background: linear-gradient(180deg,#2a6eff,#1d54d6); color: #fff; border: none; border-radius: 6px; padding: 9px 10px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
     #__ixl_panel .__ixl_toggle.__on { background: linear-gradient(180deg,#d64545,#a83232); }
     #__ixl_panel .__ixl_status { margin-top: 8px; color: #aab; font-size: 11px; }
-    #__ixl_panel .__ixl_log { margin-top: 6px; max-height: 160px; overflow-y: auto; font-size: 10px; color: #889; line-height: 1.5; }
+    #__ixl_panel .__ixl_log { margin-top: 6px; max-height: 180px; overflow-y: auto; font-size: 10px; color: #889; line-height: 1.5; }
     #__ixl_panel .__ixl_log div { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
     #__ixl_panel .__ixl_log .ok { color: #6d8; }
     #__ixl_panel .__ixl_log .err { color: #d67; }
+    #__ixl_panel .__ixl_log .hi { color: #fc6; }
   `;
 
     let running = false;
@@ -146,7 +50,7 @@
     let logEl = null;
     let toggleBtn = null;
     let busy = false;
-    let lastAnsweredSig = "";
+    let lastSig = "";
 
     function ensureStyle() {
         if (document.getElementById("__ixl_panel_style")) return;
@@ -211,7 +115,7 @@
         d.textContent = text;
         logEl.appendChild(d);
         logEl.scrollTop = logEl.scrollHeight;
-        while (logEl.children.length > 25) logEl.removeChild(logEl.firstChild);
+        while (logEl.children.length > 30) logEl.removeChild(logEl.firstChild);
     }
 
     function setStatus(s) { if (statusEl) statusEl.textContent = "status: " + s; }
@@ -329,7 +233,7 @@
                 throw new Error(`${err.error || "http " + res.status} (${ms}ms)`);
             }
             const data = await res.json();
-            console.log(`[solve] answered in ${ms}ms`);
+            pushLog(`solve ${ms}ms`, "hi");
             return data;
         } finally {
             clearTimeout(to);
@@ -343,7 +247,7 @@
     }
 
     function thinkDelay() {
-        return new Promise(r => setTimeout(r, 1200 + Math.random() * 1800));
+        return new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
     }
 
     async function loop() {
@@ -361,18 +265,16 @@
             }
 
             const sig = q.stem + "|" + (q.options || []).join("|");
-            if (sig === lastAnsweredSig) {
-                setStatus("waiting for new question");
+            if (sig === lastSig) {
+                setStatus("waiting");
                 busy = false;
                 setTimeout(loop, 1200);
                 return;
             }
 
-            // mark this question as in-flight so we don't re-send if the fetch hangs
-            lastAnsweredSig = sig;
-
+            lastSig = sig;
             setStatus(`thinking (${q.type})`);
-            pushLog(`q[${q.type}] ${q.stem.slice(0, 50)}`);
+            pushLog(`q[${q.type}] ${q.stem.slice(0, 55)}`);
 
             await thinkDelay();
 
@@ -382,7 +284,7 @@
             } catch (err) {
                 pushLog("✗ " + err.message, "err");
                 setStatus("error");
-                lastAnsweredSig = "";
+                lastSig = "";
                 busy = false;
                 setTimeout(loop, 3000);
                 return;
@@ -396,7 +298,7 @@
 
             if (!ok) {
                 pushLog("✗ could not apply", "err");
-                lastAnsweredSig = "";
+                lastSig = "";
                 busy = false;
                 setTimeout(loop, 1200);
                 return;
@@ -409,7 +311,7 @@
             const text = document.body.innerText || "";
             if (/sorry,\s*incorrect/i.test(text) || /the correct answer is/i.test(text)) {
                 pushLog("✗ wrong", "err");
-                lastAnsweredSig = "";
+                lastSig = "";
                 dismissFeedback();
             } else if (/(correct!|nice work|good job|great job|well done)/i.test(text)) {
                 pushLog("✓ correct", "ok");
