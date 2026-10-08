@@ -5,6 +5,23 @@ let token = localStorage.getItem("ixl_token") || "";
 let username = localStorage.getItem("ixl_user") || "";
 let launched = false;
 
+// ─── SSO pickup from other site ─────────────────────────
+(function pickUpSSO() {
+  const hash = location.hash.slice(1);
+  if (!hash) return;
+  const params = new URLSearchParams(hash);
+  const ssoToken = params.get("sso_token");
+  const ssoUser = params.get("sso_user");
+  if (ssoToken && ssoUser) {
+    token = ssoToken;
+    username = ssoUser;
+    localStorage.setItem("ixl_token", token);
+    localStorage.setItem("ixl_user", username);
+    history.replaceState(null, "", location.pathname);
+    console.log("[sso] logged in as", username);
+  }
+})();
+
 async function tryLogin(u, p) {
   const res = await fetch("/api/login", {
     method: "POST",
@@ -16,25 +33,48 @@ async function tryLogin(u, p) {
   return data;
 }
 
+async function trySignup(u, p, e) {
+  const res = await fetch("/api/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: u, password: p, email: e })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "signup failed");
+  return data;
+}
+
 function showLogin() {
-  if (el("screen-login")) el("screen-login").classList.remove("hidden");
-  if (el("screen-launcher")) el("screen-launcher").classList.add("hidden");
-  if (el("screen-session")) el("screen-session").classList.add("hidden");
+  el("screen-login")?.classList.remove("hidden");
+  el("screen-launcher")?.classList.add("hidden");
+  el("screen-session")?.classList.add("hidden");
 }
 
 function showLauncher() {
-  if (el("screen-login")) el("screen-login").classList.add("hidden");
-  if (el("screen-launcher")) el("screen-launcher").classList.remove("hidden");
-  if (el("screen-session")) el("screen-session").classList.add("hidden");
+  el("screen-login")?.classList.add("hidden");
+  el("screen-launcher")?.classList.remove("hidden");
+  el("screen-session")?.classList.add("hidden");
 }
 
 function showSession() {
-  if (el("screen-login")) el("screen-login").classList.add("hidden");
-  if (el("screen-launcher")) el("screen-launcher").classList.add("hidden");
-  if (el("screen-session")) el("screen-session").classList.remove("hidden");
+  el("screen-login")?.classList.add("hidden");
+  el("screen-launcher")?.classList.add("hidden");
+  el("screen-session")?.classList.remove("hidden");
 }
 
-// hide noVNC's own toolbar inside the iframe
+function setError(msg) {
+  const box = el("error-box");
+  if (!box) return;
+  if (msg) {
+    box.textContent = msg;
+    box.classList.add("visible");
+  } else {
+    box.textContent = "";
+    box.classList.remove("visible");
+  }
+}
+
+// ─── noVNC cleanup ──────────────────────────────────────
 function injectNoVncCleanup() {
   const frame = el("vnc-frame");
   if (!frame) return;
@@ -69,20 +109,28 @@ function startIframeWatch() {
   setInterval(injectNoVncCleanup, 2000);
 }
 
-async function launchWithUrl(targetUrl) {
+// ─── url normalization ──────────────────────────────────
+function normalizeUrl(raw) {
+  let u = String(raw || "").trim();
+  if (!u) return "";
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(u) && !/\s/.test(u)) return "https://" + u;
+  return "https://www.google.com/search?q=" + encodeURIComponent(u);
+}
+
+// ─── launch ─────────────────────────────────────────────
+function launchWithUrl(targetUrl) {
   if (launched) return;
   launched = true;
 
   showSession();
 
-  // ask the server to navigate chromium to the target URL
-  try {
-    await fetch("/api/navigate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-IXL-Token": token },
-      body: JSON.stringify({ url: targetUrl })
-    });
-  } catch (_) { }
+  // fire navigation in background — don't block VNC connect
+  fetch("/api/navigate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-IXL-Token": token },
+    body: JSON.stringify({ url: targetUrl })
+  }).catch(() => { });
 
   const frame = el("vnc-frame");
   if (frame) {
@@ -98,46 +146,95 @@ function backToLauncher() {
   showLauncher();
 }
 
-// ─── login ─────────────────────────────────────────────
+// ─── tab switching ──────────────────────────────────────
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    const which = tab.getAttribute("data-tab");
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.add("hidden"));
+    el("tab-" + which)?.classList.remove("hidden");
+    setError("");
+  });
+});
+
+// ─── login ──────────────────────────────────────────────
 on("login-submit", "click", async () => {
-  const u = el("user-input") ? el("user-input").value.trim() : "";
-  const p = el("pass-input") ? el("pass-input").value : "";
-  if (!u || !p) return;
-
-  const errBox = el("error-box");
-  const bootMsg = el("boot-msg");
-  if (errBox) errBox.textContent = "";
-  if (bootMsg) bootMsg.textContent = "signing in...";
-
+  const u = el("user-input")?.value.trim() || "";
+  const p = el("pass-input")?.value || "";
+  if (!u || !p) { setError("username and password required"); return; }
+  setError("");
+  el("boot-msg").textContent = "signing in...";
   const btn = el("login-submit");
-  if (btn) { btn.disabled = true; btn.textContent = "..."; }
-
+  btn.disabled = true;
+  btn.textContent = "...";
   try {
     const data = await tryLogin(u, p);
     token = data.token;
     username = data.username;
     localStorage.setItem("ixl_token", token);
     localStorage.setItem("ixl_user", username);
-    if (bootMsg) bootMsg.textContent = "sign in to continue";
     showLauncher();
   } catch (err) {
-    if (errBox) errBox.textContent = err.message;
-    if (bootMsg) bootMsg.textContent = "sign in to continue";
+    setError(err.message);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "START"; }
+    btn.disabled = false;
+    btn.textContent = "START";
+    el("boot-msg").textContent = "sign in to continue";
   }
 });
 
 on("pass-input", "keydown", (e) => { if (e.key === "Enter") el("login-submit")?.click(); });
 
-// ─── launcher buttons ──────────────────────────────────
-document.querySelectorAll("button.cabinet").forEach(btn => {
+// ─── signup ─────────────────────────────────────────────
+on("signup-submit", "click", async () => {
+  const u = el("signup-user")?.value.trim() || "";
+  const p = el("signup-pass")?.value || "";
+  const e = el("signup-email")?.value.trim() || "";
+  if (!u || !p) { setError("username and password required"); return; }
+  setError("");
+  const btn = el("signup-submit");
+  btn.disabled = true;
+  btn.textContent = "...";
+  try {
+    const data = await trySignup(u, p, e);
+    token = data.token;
+    username = data.username;
+    localStorage.setItem("ixl_token", token);
+    localStorage.setItem("ixl_user", username);
+    showLauncher();
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "CREATE ACCOUNT";
+  }
+});
+
+on("signup-pass", "keydown", (e) => { if (e.key === "Enter") el("signup-submit")?.click(); });
+
+// ─── launcher buttons ───────────────────────────────────
+document.querySelectorAll("button.launcher-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     const url = btn.getAttribute("data-url");
     if (url) launchWithUrl(url);
   });
 });
 
+// ─── unblock bar ────────────────────────────────────────
+on("unblock-go", "click", () => {
+  const input = el("unblock-input");
+  if (!input) return;
+  const url = normalizeUrl(input.value);
+  if (!url) { input.focus(); return; }
+  launchWithUrl(url);
+});
+
+on("unblock-input", "keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); el("unblock-go")?.click(); }
+});
+
+// ─── logout ─────────────────────────────────────────────
 on("logout-btn", "click", () => {
   localStorage.removeItem("ixl_token");
   localStorage.removeItem("ixl_user");
@@ -151,7 +248,7 @@ on("logout-btn", "click", () => {
 
 on("session-back", "click", backToLauncher);
 
-// ─── panic mode (Ctrl+M) ───────────────────────────────
+// ─── panic mode ─────────────────────────────────────────
 window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "m" || e.key === "M")) {
     e.preventDefault(); e.stopPropagation();
@@ -160,7 +257,7 @@ window.addEventListener("keydown", (e) => {
   }
 }, true);
 
-// ─── boot ──────────────────────────────────────────────
+// ─── boot ───────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", () => {
   if (el("user-input") && username) el("user-input").value = username;
   if (token) showLauncher();

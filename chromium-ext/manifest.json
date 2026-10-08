@@ -21,7 +21,35 @@
                 "https://forms.gle/*"
             ],
             "js": [
-                "forms.js",
+                "forms.js"
+            ],
+            "css": [
+                "panel.css"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://*.blooket.com/*"
+            ],
+            "js": [
+                "blooket.js",
+                "blooket-bypass.js"
+            ],
+            "css": [
+                "panel.css"
+            ],
+            "run_at": "document_start"
+        },
+        {
+            "matches": [
+                "https://*.quizizz.com/*",
+                "https://*.wayground.com/*"
+            ],
+            "js": [
+                "wayground.js"
+            ],
+            "css": [
                 "panel.css"
             ],
             "run_at": "document_idle"

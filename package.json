@@ -1,5 +1,5 @@
 {
-    "name": "ixl-solver",
+    "name": "study-arcade",
     "version": "1.0.0",
     "type": "module",
     "scripts": {
@@ -11,6 +11,7 @@
         "express": "^4.21.0",
         "openai": "^4.67.0",
         "playwright": "^1.48.0",
+        "proxy-chain": "^2.5.0",
         "ws": "^8.18.0"
     }
 }

@@ -6,7 +6,7 @@ import express from "express";
 import axios from "axios";
 import { fileURLToPath } from "url";
 import { chromium } from "playwright";
-import { login, verify, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
+import { login, verify, signup, ssoLogin, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
 import { getAnswer } from "./lib/answer-engine.js";
 import { lookupAnswer, saveAnswer, recordWrongAnswer } from "./lib/answer-cache.js";
 import { ensureInjected } from "./lib/inject.js";
@@ -29,7 +29,11 @@ app.use(express.static(path.join(__dirname, "public")));
 process.on("uncaughtException", (err) => console.error("[uncaught]", err.message));
 process.on("unhandledRejection", (err) => console.error("[unhandled]", err?.message || err));
 
-const OPEN_PATHS = new Set(["/api/health", "/api/login", "/api/solve", "/api/solve-form", "/api/feedback", "/api/navigate"]);
+const OPEN_PATHS = new Set([
+  "/api/health", "/api/login", "/api/signup", "/api/sso", "/api/verify",
+  "/api/solve", "/api/solve-form", "/api/feedback", "/api/navigate"
+]);
+
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
   if (req.path.startsWith("/vnc")) return next();
@@ -43,6 +47,7 @@ app.use((req, res, next) => {
   }).catch(() => res.status(401).json({ error: "auth error" }));
 });
 
+// ─── auth ───────────────────────────────────────────────
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -56,8 +61,49 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+app.post("/api/signup", async (req, res) => {
+  try {
+    const { username, password, email } = req.body || {};
+    const result = await signup(username, password, email);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    console.log(`[auth] signup ${username}`);
+    res.json({ token: result.token, username: result.username });
+  } catch (err) {
+    console.error("[signup]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/sso", async (req, res) => {
+  try {
+    const { t, s, redirect } = req.query;
+    if (!t || !s) return res.status(400).send("missing sso params");
+    const result = await ssoLogin(t, s);
+    if (!result.ok) return res.status(401).send("sso failed: " + result.error);
+    console.log(`[auth] sso login ${result.username}`);
+    const target = redirect || "/";
+    const sep = target.includes("#") ? "&" : "#";
+    res.redirect(`${target}${sep}sso_token=${encodeURIComponent(result.token)}&sso_user=${encodeURIComponent(result.username)}`);
+  } catch (err) {
+    console.error("[sso]", err.message);
+    res.status(500).send("sso error: " + err.message);
+  }
+});
+
+app.get("/api/verify", async (req, res) => {
+  try {
+    const token = req.headers["x-ixl-token"] || req.query.token;
+    const payload = await verify(token);
+    if (!payload) return res.status(401).json({ valid: false });
+    res.json({ valid: true, username: payload.u });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
+// ─── ixl creds ──────────────────────────────────────────
 app.get("/api/ixl-creds", async (req, res) => {
   try {
     const creds = await getIxlCreds(req.ixlUser);
@@ -76,6 +122,7 @@ app.post("/api/ixl-creds", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── solve ──────────────────────────────────────────────
 app.post("/api/solve", async (req, res) => {
   try {
     const q = req.body || {};
@@ -172,26 +219,59 @@ function parseCorrectAnswerText(text, question) {
   return null;
 }
 
+// ─── dataset export ─────────────────────────────────────
+app.post("/api/export-dataset", async (req, res) => {
+  try {
+    const { exportDataset } = await import("./lib/dataset-export.js");
+    const result = await exportDataset();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── navigate (fast path) ───────────────────────────────
+let navBrowser = null;
+
+async function getNavBrowser() {
+  if (navBrowser) {
+    try { await navBrowser.contexts(); return navBrowser; }
+    catch (_) { navBrowser = null; }
+  }
+  navBrowser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+  return navBrowser;
+}
+
 app.post("/api/navigate", async (req, res) => {
+  const t0 = Date.now();
   try {
     const { url } = req.body || {};
     if (!url) return res.status(400).json({ error: "no url" });
+    if (!/^https?:\/\//i.test(url)) {
+      return res.status(400).json({ error: "only http/https allowed" });
+    }
     console.log(`[navigate] → ${url}`);
-    const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+
+    const browser = await getNavBrowser();
     const contexts = browser.contexts();
-    if (!contexts.length) { await browser.close().catch(() => { }); return res.status(503).json({ error: "no context" }); }
+    if (!contexts.length) return res.status(503).json({ error: "no context" });
+
     const context = contexts[0];
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
-    try { await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 }); } catch (_) { }
-    await browser.close().catch(() => { });
-    res.json({ ok: true });
+
+    page.goto(url, { waitUntil: "commit", timeout: 30000 })
+      .catch((err) => console.warn(`[navigate] goto warning: ${err.message.slice(0, 100)}`));
+
+    console.log(`[navigate] dispatched in ${Date.now() - t0}ms`);
+    res.json({ ok: true, dispatched: Date.now() - t0 });
   } catch (err) {
     console.error("[navigate]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// ─── VNC proxy ──────────────────────────────────────────
 app.get("/vnc/package.json", (req, res) => res.json({ name: "novnc", version: "1.5.0" }));
 
 app.use("/vnc", (req, res) => {
@@ -237,4 +317,8 @@ server.listen(port, host, async () => {
   console.log(`[ixl-server] http://${host}:${port}`);
   try { await loadSecrets(); console.log("[ixl-server] secrets loaded"); } catch (_) { }
   try { await ensureInjected(); console.log("[ixl-server] inject started"); } catch (err) { console.error("[ixl-server] inject:", err.message); }
+  try {
+    const { warmup } = await import("./lib/warmup.js");
+    await warmup();
+  } catch (_) { }
 });

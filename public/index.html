@@ -7,357 +7,26 @@
     <title>Study Arcade</title>
     <link rel="icon" type="image/png" href="/square_og_ixl.png" />
     <link rel="apple-touch-icon" href="/square_og_ixl.png" />
-    <style>
-        @import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap");
-
-        :root {
-            --bg: #0b0620;
-            --panel: #1a0f3a;
-            --pink: #ff3ea5;
-            --cyan: #37f5ff;
-            --yellow: #ffe84d;
-            --green: #5dff7a;
-            --text: #f4eaff;
-        }
-
-        * {
-            box-sizing: border-box;
-        }
-
-        html,
-        body {
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            min-height: 100vh;
-            font-family: "VT323", monospace;
-            font-size: 22px;
-            color: var(--text);
-            background:
-                radial-gradient(circle at 20% 10%, rgba(255, 62, 165, 0.18), transparent 40%),
-                radial-gradient(circle at 80% 90%, rgba(55, 245, 255, 0.15), transparent 40%),
-                var(--bg);
-            background-attachment: fixed;
-            overflow-x: hidden;
-        }
-
-        body::after {
-            content: "";
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            background: repeating-linear-gradient(to bottom,
-                    rgba(0, 0, 0, 0) 0px,
-                    rgba(0, 0, 0, 0) 2px,
-                    rgba(0, 0, 0, 0.25) 3px,
-                    rgba(0, 0, 0, 0) 4px);
-            z-index: 9998;
-        }
-
-        /* ─── login ───────────────────────────────────────── */
-        .login-wrap {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-
-        .login-card {
-            width: 100%;
-            max-width: 420px;
-            background: var(--panel);
-            border: 4px solid var(--cyan);
-            border-radius: 6px;
-            box-shadow: 0 0 0 4px var(--bg), 0 0 0 8px var(--pink), 6px 6px 0 8px var(--bg);
-            padding: 32px 28px;
-            text-align: center;
-        }
-
-        .login-card h1 {
-            font-family: "Press Start 2P", monospace;
-            font-size: 18px;
-            color: var(--yellow);
-            text-shadow: 4px 4px 0 var(--pink);
-            margin: 0 0 10px;
-            line-height: 1.5;
-        }
-
-        .login-card .sub {
-            color: var(--cyan);
-            font-size: 18px;
-            margin: 0 0 24px;
-        }
-
-        .login-card label {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            text-align: left;
-            font-family: "Press Start 2P", monospace;
-            font-size: 10px;
-            color: var(--yellow);
-            margin-bottom: 16px;
-            letter-spacing: 1px;
-        }
-
-        .login-card input {
-            background: var(--bg);
-            border: 3px solid var(--cyan);
-            color: var(--text);
-            padding: 12px 14px;
-            border-radius: 4px;
-            font-family: "VT323", monospace;
-            font-size: 20px;
-            outline: none;
-        }
-
-        .login-card input:focus {
-            border-color: var(--yellow);
-        }
-
-        .login-card button {
-            width: 100%;
-            background: var(--yellow);
-            color: var(--bg);
-            border: none;
-            padding: 12px;
-            font-family: "Press Start 2P", monospace;
-            font-size: 12px;
-            cursor: pointer;
-            box-shadow: 0 4px 0 #b39b00;
-            margin-top: 8px;
-        }
-
-        .login-card button:hover {
-            background: var(--pink);
-            box-shadow: 0 4px 0 #a0205f;
-        }
-
-        .login-card button:disabled {
-            opacity: .5;
-            cursor: wait;
-        }
-
-        .err {
-            margin-top: 14px;
-            color: #ff6b95;
-            font-size: 18px;
-            min-height: 20px;
-        }
-
-        /* ─── arcade ─────────────────────────────────────── */
-        main.arcade {
-            max-width: 960px;
-            margin: 0 auto;
-            padding: 48px 20px 64px;
-            text-align: center;
-        }
-
-        main.arcade h1 {
-            font-family: "Press Start 2P", monospace;
-            font-size: clamp(18px, 4vw, 30px);
-            color: var(--yellow);
-            text-shadow: 4px 4px 0 var(--pink), 0 0 18px rgba(255, 232, 77, 0.5);
-            margin: 0 0 14px;
-            line-height: 1.4;
-        }
-
-        .intro {
-            color: var(--cyan);
-            margin: 0 0 40px;
-            letter-spacing: 1px;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 26px;
-        }
-
-        button.cabinet {
-            display: block;
-            width: 100%;
-            cursor: pointer;
-            font-family: inherit;
-            color: inherit;
-            text-align: center;
-            background: var(--panel);
-            border: 4px solid var(--cyan);
-            border-radius: 6px;
-            box-shadow: 0 0 0 4px var(--bg), 0 0 0 8px var(--pink), 6px 6px 0 8px var(--bg);
-            padding: 26px 18px 22px;
-            transition: transform 0.1s steps(2), box-shadow 0.1s steps(2), border-color 0.1s;
-        }
-
-        button.cabinet:hover,
-        button.cabinet:focus-visible {
-            transform: translate(-3px, -3px);
-            border-color: var(--yellow);
-            outline: none;
-            box-shadow: 0 0 0 4px var(--bg), 0 0 0 8px var(--yellow), 9px 9px 0 8px var(--bg);
-        }
-
-        .icon {
-            font-size: 56px;
-            line-height: 1;
-            margin-bottom: 16px;
-        }
-
-        .name {
-            font-family: "Press Start 2P", monospace;
-            font-size: 15px;
-            color: var(--green);
-            margin-bottom: 14px;
-            line-height: 1.5;
-        }
-
-        .desc {
-            color: var(--text);
-            opacity: 0.85;
-            margin-bottom: 18px;
-        }
-
-        .play {
-            display: inline-block;
-            font-family: "Press Start 2P", monospace;
-            font-size: 11px;
-            color: var(--bg);
-            background: var(--yellow);
-            padding: 10px 12px;
-            box-shadow: 0 4px 0 #b39b00;
-        }
-
-        button.cabinet:hover .play {
-            background: var(--pink);
-            box-shadow: 0 4px 0 #a0205f;
-        }
-
-        .blink {
-            margin-top: 44px;
-            color: var(--yellow);
-            font-family: "Press Start 2P", monospace;
-            font-size: 12px;
-            animation: blink 1s steps(2, start) infinite;
-        }
-
-        @keyframes blink {
-            to {
-                visibility: hidden;
-            }
-        }
-
-        footer.arcade-foot {
-            margin-top: 30px;
-            color: var(--cyan);
-            opacity: 0.7;
-            font-size: 18px;
-        }
-
-        .logout {
-            background: transparent;
-            border: 2px solid var(--cyan);
-            color: var(--cyan);
-            padding: 6px 14px;
-            font-family: "Press Start 2P", monospace;
-            font-size: 9px;
-            cursor: pointer;
-            margin-top: 20px;
-        }
-
-        .logout:hover {
-            background: var(--cyan);
-            color: var(--bg);
-        }
-
-        /* ─── VNC session ────────────────────────────────── */
-        .session {
-            position: fixed;
-            inset: 0;
-            background: #000;
-            display: flex;
-            z-index: 100;
-        }
-
-        .session iframe {
-            width: 100%;
-            height: 100%;
-            border: 0;
-            display: block;
-        }
-
-        .session .back-btn {
-            position: fixed;
-            top: 8px;
-            left: 8px;
-            z-index: 200;
-            background: rgba(18, 22, 34, 0.85);
-            color: #d8dde8;
-            border: 1px solid rgba(120, 140, 200, 0.5);
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-family: "VT323", monospace;
-            font-size: 16px;
-            cursor: pointer;
-            backdrop-filter: blur(6px);
-        }
-
-        .session .back-btn:hover {
-            background: rgba(40, 46, 66, 0.9);
-        }
-
-        .panic-overlay {
-            position: fixed;
-            inset: 0;
-            background: #fff;
-            color: #202124;
-            padding: 40px 60px;
-            overflow: auto;
-            z-index: 9999;
-        }
-
-        .panic-overlay[hidden] {
-            display: none;
-        }
-
-        .panic-title {
-            font-family: "Product Sans", Roboto, sans-serif;
-            font-size: 28px;
-            font-weight: 500;
-            margin-bottom: 24px;
-        }
-
-        .panic-line {
-            height: 14px;
-            background: #e8eaed;
-            border-radius: 4px;
-            margin-bottom: 14px;
-            width: 100%;
-        }
-
-        .panic-line.short {
-            width: 60%;
-        }
-
-        .panic-line.shorter {
-            width: 40%;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body>
 
-    <!-- login -->
+    <!-- login / signup -->
     <div class="login-wrap" id="screen-login">
         <div class="login-card">
             <h1>Study Arcade</h1>
             <p class="sub" id="boot-msg">sign in to continue</p>
 
-            <div id="login-box">
+            <div class="tabs">
+                <button class="tab active" data-tab="login" type="button">LOGIN</button>
+                <button class="tab" data-tab="signup" type="button">SIGN UP</button>
+            </div>
+
+            <div id="tab-login" class="tab-panel">
                 <label>
                     username
                     <input type="text" id="user-input" autocomplete="username" />
@@ -369,50 +38,66 @@
                 <button id="login-submit" type="button">START</button>
             </div>
 
+            <div id="tab-signup" class="tab-panel hidden">
+                <label>
+                    username
+                    <input type="text" id="signup-user" autocomplete="username" />
+                </label>
+                <label>
+                    email (optional)
+                    <input type="email" id="signup-email" autocomplete="email" />
+                </label>
+                <label>
+                    password
+                    <input type="password" id="signup-pass" autocomplete="new-password" />
+                </label>
+                <button id="signup-submit" type="button">CREATE ACCOUNT</button>
+            </div>
+
             <div class="err" id="error-box"></div>
         </div>
     </div>
 
     <!-- launcher -->
-    <main class="arcade hidden" id="screen-launcher">
-        <h1>Study Arcade</h1>
-        <p class="intro">Pick a game and press START</p>
+    <main class="launcher-wrap hidden" id="screen-launcher">
+        <h1 class="launcher-title">Study Arcade</h1>
 
-        <div class="grid">
-            <button class="cabinet" data-url="https://www.ixl.com/">
-                <div class="icon">📘</div>
-                <div class="name">IXL</div>
-                <div class="desc">Math, reading, language arts and science practice</div>
-                <span class="play">PLAY</span>
+        <div class="launcher-grid">
+            <button class="launcher-btn" data-url="https://www.ixl.com/">
+                <div class="launcher-icon" style="color:#1c4980;">IXL</div>
+                <div class="launcher-label">IXL</div>
+                <div class="launcher-desc">math, reading, science</div>
             </button>
 
-            <button class="cabinet" data-url="https://wayground.com/">
-                <div class="icon">⚡</div>
-                <div class="name">WAYGROUND</div>
-                <div class="desc">Quizzes and review rounds (formerly Quizizz)</div>
-                <span class="play">PLAY</span>
+            <button class="launcher-btn" data-url="https://wayground.com/">
+                <div class="launcher-icon" style="color:#9b7dff;">⚡</div>
+                <div class="launcher-label">WAYGROUND</div>
+                <div class="launcher-desc">quizzes & review</div>
             </button>
 
-            <button class="cabinet" data-url="https://www.blooket.com/">
-                <div class="icon">🎮</div>
-                <div class="name">BLOOKET</div>
-                <div class="desc">Games and quizzes for review</div>
-                <span class="play">PLAY</span>
+            <button class="launcher-btn" data-url="https://www.blooket.com/">
+                <div class="launcher-icon" style="color:#ff7b3d;">🎮</div>
+                <div class="launcher-label">BLOOKET</div>
+                <div class="launcher-desc">game-based review</div>
             </button>
 
-            <button class="cabinet" data-url="https://docs.google.com/forms/">
-                <div class="icon">📝</div>
-                <div class="name">FORMS</div>
-                <div class="desc">Google Forms — open any form by URL</div>
-                <span class="play">PLAY</span>
+            <button class="launcher-btn" data-url="https://docs.google.com/forms/">
+                <div class="launcher-icon" style="color:#7ac143;">📝</div>
+                <div class="launcher-label">FORMS</div>
+                <div class="launcher-desc">google forms solver</div>
             </button>
         </div>
 
-        <div class="blink">INSERT COIN TO CONTINUE</div>
-        <footer class="arcade-foot">
-            Each game asks you to sign in on its own page.
-            <br />
-            <button class="logout" id="logout-btn" type="button">LOGOUT</button>
+        <p class="unblock-label">▶ unblock any site</p>
+        <div class="unblock-bar">
+            <input type="text" id="unblock-input" placeholder="paste link or type e.g. youtube.com" autocomplete="off"
+                spellcheck="false" />
+            <button id="unblock-go" type="button">GO</button>
+        </div>
+
+        <footer class="launcher-foot">
+            <span>each site signs in on its own page</span>
+            <button class="ghost" id="logout-btn" type="button">LOGOUT</button>
         </footer>
     </main>
 

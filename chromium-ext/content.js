@@ -447,7 +447,7 @@
     }
 
     function thinkDelay() {
-        return new Promise(r => setTimeout(r, 5000));
+        return new Promise(r => setTimeout(r, 300 + Math.random() * 400));
     }
 
     async function loop() {

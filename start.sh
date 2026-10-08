@@ -54,12 +54,14 @@ echo "[start] launching chrome..."
   --remote-debugging-port=9222 \
   --remote-debugging-address=127.0.0.1 \
   --remote-allow-origins=* \
+  --enable-features=NetworkServiceInProcess2 \
+  --enable-quic \
+  --disk-cache-size=536870912 \
+  --media-cache-size=134217728 \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \
   --user-data-dir="$PROFILE_DIR" \
-  --disk-cache-size=209715200 \
-  --media-cache-size=52428800 \
   > /tmp/chrome.log 2>&1 &
 
 echo "[start] chrome pid: $!"
