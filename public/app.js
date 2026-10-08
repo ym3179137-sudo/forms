@@ -16,36 +16,25 @@ async function tryLogin(u, p) {
   return data;
 }
 
-async function saveIxlCreds(email, password) {
-  try { localStorage.setItem("__ixl_creds_" + username, JSON.stringify({ email, password })); } catch (_) { }
-  try {
-    await fetch("/api/ixl-creds", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-IXL-Token": token },
-      body: JSON.stringify({ email, password })
-    });
-  } catch (_) { }
-}
-
 function showLogin() {
-  if (el("screen-login")) el("screen-login").hidden = false;
-  if (el("screen-launcher")) el("screen-launcher").hidden = true;
-  if (el("screen-session")) el("screen-session").hidden = true;
+  if (el("screen-login")) el("screen-login").classList.remove("hidden");
+  if (el("screen-launcher")) el("screen-launcher").classList.add("hidden");
+  if (el("screen-session")) el("screen-session").classList.add("hidden");
 }
 
 function showLauncher() {
-  if (el("screen-login")) el("screen-login").hidden = true;
-  if (el("screen-launcher")) el("screen-launcher").hidden = false;
-  if (el("screen-session")) el("screen-session").hidden = true;
-  if (el("launcher-status")) el("launcher-status").textContent = "signed in as " + username;
+  if (el("screen-login")) el("screen-login").classList.add("hidden");
+  if (el("screen-launcher")) el("screen-launcher").classList.remove("hidden");
+  if (el("screen-session")) el("screen-session").classList.add("hidden");
 }
 
 function showSession() {
-  if (el("screen-login")) el("screen-login").hidden = true;
-  if (el("screen-launcher")) el("screen-launcher").hidden = true;
-  if (el("screen-session")) el("screen-session").hidden = false;
+  if (el("screen-login")) el("screen-login").classList.add("hidden");
+  if (el("screen-launcher")) el("screen-launcher").classList.add("hidden");
+  if (el("screen-session")) el("screen-session").classList.remove("hidden");
 }
 
+// hide noVNC's own toolbar inside the iframe
 function injectNoVncCleanup() {
   const frame = el("vnc-frame");
   if (!frame) return;
@@ -85,9 +74,8 @@ async function launchWithUrl(targetUrl) {
   launched = true;
 
   showSession();
-  if (el("launcher-status")) el("launcher-status").textContent = "loading " + targetUrl;
 
-  // tell the server which page to open in the VNC
+  // ask the server to navigate chromium to the target URL
   try {
     await fetch("/api/navigate", {
       method: "POST",
@@ -103,44 +91,47 @@ async function launchWithUrl(targetUrl) {
   }
 }
 
-function openIxlModal(prefill) {
-  const modal = el("ixl-modal");
-  if (!modal) return;
-  if (prefill) {
-    if (el("ixl-email")) el("ixl-email").value = prefill.email || "";
-    if (el("ixl-pass")) el("ixl-pass").value = prefill.password || "";
-  }
-  modal.hidden = false;
+function backToLauncher() {
+  launched = false;
+  const frame = el("vnc-frame");
+  if (frame) frame.src = "";
+  showLauncher();
 }
 
-function closeIxlModal() {
-  const modal = el("ixl-modal");
-  if (modal) modal.hidden = true;
-}
-
-// ─── buttons ───────────────────────────────────────────
+// ─── login ─────────────────────────────────────────────
 on("login-submit", "click", async () => {
   const u = el("user-input") ? el("user-input").value.trim() : "";
   const p = el("pass-input") ? el("pass-input").value : "";
   if (!u || !p) return;
-  if (el("error-box")) el("error-box").hidden = true;
-  if (el("boot-msg")) el("boot-msg").textContent = "signing in...";
+
+  const errBox = el("error-box");
+  const bootMsg = el("boot-msg");
+  if (errBox) errBox.textContent = "";
+  if (bootMsg) bootMsg.textContent = "signing in...";
+
+  const btn = el("login-submit");
+  if (btn) { btn.disabled = true; btn.textContent = "..."; }
+
   try {
     const data = await tryLogin(u, p);
     token = data.token;
     username = data.username;
     localStorage.setItem("ixl_token", token);
     localStorage.setItem("ixl_user", username);
+    if (bootMsg) bootMsg.textContent = "sign in to continue";
     showLauncher();
   } catch (err) {
-    if (el("error-box")) { el("error-box").hidden = false; el("error-box").textContent = err.message; }
-    if (el("boot-msg")) el("boot-msg").textContent = "sign in to continue.";
+    if (errBox) errBox.textContent = err.message;
+    if (bootMsg) bootMsg.textContent = "sign in to continue";
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "START"; }
   }
 });
 
 on("pass-input", "keydown", (e) => { if (e.key === "Enter") el("login-submit")?.click(); });
 
-document.querySelectorAll(".launcher-btn").forEach(btn => {
+// ─── launcher buttons ──────────────────────────────────
+document.querySelectorAll("button.cabinet").forEach(btn => {
   btn.addEventListener("click", () => {
     const url = btn.getAttribute("data-url");
     if (url) launchWithUrl(url);
@@ -158,19 +149,9 @@ on("logout-btn", "click", () => {
   showLogin();
 });
 
-on("ixl-save", "click", async () => {
-  const email = el("ixl-email")?.value.trim() || "";
-  const password = el("ixl-pass")?.value || "";
-  if (!email || !password) return;
-  const btn = el("ixl-save");
-  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
-  await saveIxlCreds(email, password);
-  if (btn) { btn.disabled = false; btn.textContent = "Save & Log In"; }
-  closeIxlModal();
-});
+on("session-back", "click", backToLauncher);
 
-on("ixl-skip", "click", () => { closeIxlModal(); });
-
+// ─── panic mode (Ctrl+M) ───────────────────────────────
 window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "m" || e.key === "M")) {
     e.preventDefault(); e.stopPropagation();
@@ -179,7 +160,9 @@ window.addEventListener("keydown", (e) => {
   }
 }, true);
 
+// ─── boot ──────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", () => {
   if (el("user-input") && username) el("user-input").value = username;
-  if (token) showLauncher(); else showLogin();
+  if (token) showLauncher();
+  else showLogin();
 });
