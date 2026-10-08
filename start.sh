@@ -16,15 +16,19 @@ sleep 1
 
 CHROME_BIN="/usr/bin/google-chrome-stable"
 if [ ! -f "$CHROME_BIN" ]; then
+  echo "[start] real chrome missing, falling back to playwright chromium"
   CHROME_BIN=$(find /ms-playwright -type f -name chrome 2>/dev/null | head -1)
 fi
 echo "[start] chrome: $CHROME_BIN"
+chmod +x "$CHROME_BIN" 2>/dev/null
 
 PROFILE_DIR=/data/ixl-profile
 if [ ! -d "/data" ]; then
   PROFILE_DIR=/tmp/ixl-profile
+  echo "[start] /data not mounted, using /tmp"
 fi
 mkdir -p "$PROFILE_DIR"
+echo "[start] profile: $PROFILE_DIR"
 
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
@@ -53,6 +57,7 @@ echo "[start] launching chrome with CDP on 9222..."
   --use-mock-keychain \
   --remote-debugging-port=9222 \
   --remote-debugging-address=127.0.0.1 \
+  --remote-allow-origins=* \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \
@@ -63,5 +68,8 @@ echo "[start] launching chrome with CDP on 9222..."
 
 echo "[start] chrome pid: $!"
 sleep 3
+echo "[start] chrome log:"
+cat /tmp/chrome.log 2>/dev/null | head -20
+
 echo "[start] launching node server..."
 node server.js
