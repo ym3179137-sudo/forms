@@ -12,6 +12,7 @@
 
 <body>
 
+    <!-- login -->
     <div class="login-wrap" id="screen-login">
         <div class="login-card">
             <img class="brand-logo" src="/square_og_ixl.png" alt="IXL" onerror="this.style.display='none'" />
@@ -34,6 +35,37 @@
         </div>
     </div>
 
+    <!-- launcher -->
+    <div class="launcher-wrap" id="screen-launcher" hidden>
+        <h1 class="launcher-title">choose a site</h1>
+        <div class="launcher-grid">
+            <button class="launcher-btn ixl" data-url="https://www.ixl.com/">
+                <div class="launcher-icon">
+                    <span class="ixl-i">I</span><span class="ixl-x">X</span><span class="ixl-l">L</span>
+                </div>
+                <div class="launcher-label">IXL</div>
+                <div class="launcher-desc">math · ela · science</div>
+            </button>
+
+            <button class="launcher-btn wayground" data-url="https://wayground.com/">
+                <div class="launcher-icon">⚡</div>
+                <div class="launcher-label">Wayground</div>
+                <div class="launcher-desc">formerly quizizz</div>
+            </button>
+
+            <button class="launcher-btn blooket" data-url="https://www.blooket.com/">
+                <div class="launcher-icon">🎮</div>
+                <div class="launcher-label">Blooket</div>
+                <div class="launcher-desc">games & quizzes</div>
+            </button>
+        </div>
+        <div class="launcher-foot">
+            <span id="launcher-status">ready</span>
+            <button id="logout-btn" class="ghost" type="button">logout</button>
+        </div>
+    </div>
+
+    <!-- VNC / browser -->
     <div class="browser" id="screen-session" hidden>
         <div class="viewport" id="viewer-wrap">
             <iframe id="vnc-frame" src="" allow="clipboard-read; clipboard-write"></iframe>
@@ -52,6 +84,7 @@
         </div>
     </div>
 
+    <!-- IXL creds modal -->
     <div class="ixl-modal" id="ixl-modal" hidden>
         <div class="ixl-modal-card">
             <h2>IXL Auto-Login</h2>

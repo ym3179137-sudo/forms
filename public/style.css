@@ -112,6 +112,133 @@ h1 {
     margin-top: 12px;
 }
 
+/* ─── launcher ────────────────────────────────────────── */
+.launcher-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 60px 20px 24px;
+}
+
+.launcher-title {
+    margin: 0 0 36px 0;
+    font-size: 20px;
+    color: #8ab4ff;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 400;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.launcher-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 220px));
+    gap: 20px;
+    justify-content: center;
+    width: 100%;
+    max-width: 760px;
+}
+
+.launcher-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 32px 20px;
+    background: #10141e;
+    border: 1px solid #1c2330;
+    border-radius: 14px;
+    cursor: pointer;
+    font-family: inherit;
+    color: #d8dde8;
+    transition: transform 0.12s, border-color 0.12s, background 0.12s;
+    aspect-ratio: 1;
+}
+
+.launcher-btn:hover {
+    transform: translateY(-3px);
+    background: #141926;
+    border-color: #3a6fff;
+}
+
+.launcher-btn:active {
+    transform: translateY(-1px);
+}
+
+.launcher-icon {
+    font-size: 42px;
+    font-weight: 900;
+    line-height: 1;
+    font-family: Arial, Helvetica, sans-serif;
+    letter-spacing: -2px;
+    display: inline-flex;
+    align-items: baseline;
+}
+
+.launcher-btn.ixl .launcher-icon {
+    color: #1c4980;
+    letter-spacing: -3px;
+}
+
+.launcher-btn.ixl .ixl-i {
+    color: #1c4980;
+}
+
+.launcher-btn.ixl .ixl-x {
+    color: #f5a623;
+}
+
+.launcher-btn.ixl .ixl-l {
+    color: #7ac143;
+}
+
+.launcher-btn.wayground .launcher-icon {
+    color: #9b7dff;
+}
+
+.launcher-btn.blooket .launcher-icon {
+    color: #ff7b3d;
+}
+
+.launcher-label {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.launcher-desc {
+    font-size: 11px;
+    color: #667;
+    letter-spacing: 0.3px;
+}
+
+.launcher-foot {
+    margin-top: 40px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 11px;
+    color: #667;
+}
+
+.ghost {
+    background: transparent;
+    border: 1px solid #232a3a;
+    color: #99a;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+}
+
+.ghost:hover {
+    border-color: #3a6fff;
+    color: #8ab4ff;
+}
+
 /* ─── browser ─────────────────────────────────────────── */
 .browser {
     display: flex;

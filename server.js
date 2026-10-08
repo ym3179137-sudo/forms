@@ -5,6 +5,7 @@ import http from "http";
 import express from "express";
 import axios from "axios";
 import { fileURLToPath } from "url";
+import { chromium } from "playwright";
 import { login, verify, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
 import { getAnswer } from "./lib/answer-engine.js";
 import { lookupAnswer, saveAnswer, recordWrongAnswer } from "./lib/answer-cache.js";
@@ -37,7 +38,14 @@ process.on("unhandledRejection", (err) => {
 });
 
 // ─── auth middleware ────────────────────────────────────────
-const OPEN_PATHS = new Set(["/api/health", "/api/login", "/api/solve", "/api/solve-form", "/api/feedback"]);
+const OPEN_PATHS = new Set([
+  "/api/health",
+  "/api/login",
+  "/api/solve",
+  "/api/solve-form",
+  "/api/feedback",
+  "/api/navigate"
+]);
 app.use((req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
   if (req.path.startsWith("/vnc")) return next();
@@ -88,7 +96,7 @@ app.post("/api/ixl-creds", async (req, res) => {
   }
 });
 
-// ─── SOLVE (IXL — single question) ─────────────────────────
+// ─── SOLVE (single question — IXL, Wayground, Blooket) ─────
 app.post("/api/solve", async (req, res) => {
   try {
     const q = req.body || {};
@@ -247,6 +255,38 @@ function parseCorrectAnswerText(text, question) {
   return null;
 }
 
+// ─── NAVIGATE (launcher tells VNC which URL to open) ───────
+app.post("/api/navigate", async (req, res) => {
+  try {
+    const { url } = req.body || {};
+    if (!url) return res.status(400).json({ error: "no url" });
+
+    console.log(`[navigate] → ${url}`);
+
+    const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+    const contexts = browser.contexts();
+    if (!contexts.length) {
+      await browser.close().catch(() => { });
+      return res.status(503).json({ error: "no chromium context" });
+    }
+    const context = contexts[0];
+    const pages = context.pages();
+    const page = pages[0] || await context.newPage();
+
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    } catch (err) {
+      console.warn(`[navigate] goto warning: ${err.message.slice(0, 80)}`);
+    }
+
+    await browser.close().catch(() => { });
+    res.json({ ok: true, url });
+  } catch (err) {
+    console.error("[navigate]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── VNC proxy ──────────────────────────────────────────────
 app.get("/vnc/package.json", (req, res) => res.json({ name: "novnc", version: "1.5.0" }));
 
@@ -295,7 +335,7 @@ server.on("upgrade", (req, socket, head) => {
     socket.write("HTTP/1.1 101 Switching Protocols\r\n");
     for (const [k, v] of Object.entries(proxyRes.headers)) {
       const val = Array.isArray(v) ? v.join(", ") : v;
-      socket.write(`${k}: ${val}\r\n`);
+      socket.write(`${k}: ${v}\r\n`);
     }
     socket.write("\r\n");
     if (proxyHead && proxyHead.length) socket.write(proxyHead);
