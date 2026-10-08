@@ -15,6 +15,7 @@ body {
     overflow: hidden;
 }
 
+/* ─── login ───────────────────────────────────────────── */
 .login-wrap {
     display: flex;
     align-items: center;
@@ -111,6 +112,7 @@ h1 {
     margin-top: 12px;
 }
 
+/* ─── browser ─────────────────────────────────────────── */
 .browser {
     display: flex;
     flex-direction: column;
@@ -137,6 +139,7 @@ h1 {
     flex: 1;
 }
 
+/* ─── panic overlay ───────────────────────────────────── */
 .panic-overlay {
     position: fixed;
     inset: 0;
@@ -174,6 +177,7 @@ h1 {
     width: 40%;
 }
 
+/* ─── IXL creds modal ─────────────────────────────────── */
 .ixl-modal {
     position: fixed;
     inset: 0;

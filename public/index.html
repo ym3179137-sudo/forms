@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IXL</title>
+    <link rel="icon" type="image/png" href="/square_og_ixl.png" />
+    <link rel="apple-touch-icon" href="/square_og_ixl.png" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+
+    <div class="login-wrap" id="screen-login">
+        <div class="login-card">
+            <img class="brand-logo" src="/square_og_ixl.png" alt="IXL" onerror="this.style.display='none'" />
+            <h1>ixl-solver</h1>
+            <p class="sub" id="boot-msg">sign in to continue.</p>
+
+            <div id="login-box">
+                <label>
+                    username
+                    <input type="text" id="user-input" autocomplete="username" />
+                </label>
+                <label>
+                    password
+                    <input type="password" id="pass-input" autocomplete="current-password" />
+                </label>
+                <button id="login-submit" type="button">Sign in</button>
+            </div>
+
+            <div id="error-box" class="err" hidden></div>
+        </div>
+    </div>
+
+    <div class="browser" id="screen-session" hidden>
+        <div class="viewport" id="viewer-wrap">
+            <iframe id="vnc-frame" src="" allow="clipboard-read; clipboard-write"></iframe>
+            <div class="panic-overlay" id="panic-overlay" hidden>
+                <div class="panic-inner">
+                    <div class="panic-title">Google Classroom</div>
+                    <div class="panic-line"></div>
+                    <div class="panic-line short"></div>
+                    <div class="panic-line"></div>
+                    <div class="panic-line shorter"></div>
+                    <div class="panic-line"></div>
+                    <div class="panic-line"></div>
+                    <div class="panic-line short"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="ixl-modal" id="ixl-modal" hidden>
+        <div class="ixl-modal-card">
+            <h2>IXL Auto-Login</h2>
+            <p class="sub">Save your IXL login once. It fills automatically on every session.</p>
+            <label>
+                IXL username or email
+                <input type="text" id="ixl-email" autocomplete="off" />
+            </label>
+            <label>
+                IXL password
+                <input type="password" id="ixl-pass" autocomplete="off" />
+            </label>
+            <div class="ixl-modal-actions">
+                <button class="ghost" id="ixl-skip" type="button">Skip</button>
+                <button id="ixl-save" type="button">Save &amp; Log In</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+
+</html>
