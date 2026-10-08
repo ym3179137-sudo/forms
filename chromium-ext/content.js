@@ -1,5 +1,5 @@
 (function () {
-    // ─── stealth ──────────────────────────────────────────
+    // ─── anti-detect + stealth ─────────────────────────────
     (function stealth() {
         try {
             Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -107,9 +107,9 @@
         else { token = sessionStorage.getItem("__ixl_tok") || ""; }
     } catch (_) { }
 
-    // ─── per-user prefs ────────────────────────────────────
-    const PREFS_KEY = "__ixl_prefs";
-    const defaultPrefs = { thinkSeconds: 5, maxWrong: 0 };
+    // ─── per-user prefs (max wrong only) ────────────────────
+    const PREFS_KEY = "__ixl_prefs_v2";
+    const defaultPrefs = { maxWrong: 0 };
     function getPrefs() {
         try {
             const raw = localStorage.getItem(PREFS_KEY);
@@ -122,7 +122,7 @@
     }
 
     const css = `
-    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 360px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
+    #__ixl_panel { position: fixed; bottom: 16px; right: 16px; width: 340px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
     #__ixl_panel.__hidden { display: none !important; }
     #__ixl_panel .__ixl_header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     #__ixl_panel .__ixl_title { font-weight: 600; color: #8ab4ff; letter-spacing: 0.5px; }
@@ -134,15 +134,18 @@
     #__ixl_panel .__ixl_field input { background: #0c0f17; border: 1px solid #232a3a; color: #d8dde8; padding: 6px 8px; border-radius: 4px; font-family: inherit; font-size: 11px; outline: none; width: 100%; }
     #__ixl_panel .__ixl_field input:focus { border-color: #3a6fff; }
     #__ixl_panel .__ixl_status { margin-top: 8px; color: #aab; font-size: 11px; }
-    #__ixl_panel .__ixl_log { margin-top: 6px; max-height: 160px; overflow-y: auto; font-size: 10px; color: #889; line-height: 1.5; }
+    #__ixl_panel .__ixl_log { margin-top: 6px; max-height: 180px; overflow-y: auto; font-size: 10px; color: #889; line-height: 1.5; }
     #__ixl_panel .__ixl_log div { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
     #__ixl_panel .__ixl_log .ok { color: #6d8; }
     #__ixl_panel .__ixl_log .err { color: #d67; }
     #__ixl_panel .__ixl_log .warn { color: #fc6; }
   `;
 
-    let running = false, panelEl, statusEl, logEl, toggleBtn;
-    let busy = false, lastAnsweredSig = "", wrongCount = 0;
+    let running = false;
+    let panelEl = null, statusEl = null, logEl = null, toggleBtn = null;
+    let busy = false;
+    let lastAnsweredSig = "";
+    let wrongCount = 0;
     let currentPrefs = getPrefs();
 
     function ensureStyle() {
@@ -164,8 +167,7 @@
       </div>
       <button class="__ixl_toggle">▶ Start Auto</button>
       <div class="__ixl_row">
-        <label class="__ixl_field">think delay (sec)<input type="number" id="__ixl_think" min="0" max="60" value="${currentPrefs.thinkSeconds}" /></label>
-        <label class="__ixl_field">max wrong (0=∞)<input type="number" id="__ixl_maxwrong" min="0" max="999" value="${currentPrefs.maxWrong}" /></label>
+        <label class="__ixl_field">stop after wrong answers (0=∞)<input type="number" id="__ixl_maxwrong" min="0" max="999" value="${currentPrefs.maxWrong}" /></label>
       </div>
       <div class="__ixl_status">status: idle</div>
       <div class="__ixl_log"></div>
@@ -176,17 +178,7 @@
         statusEl = panelEl.querySelector(".__ixl_status");
         logEl = panelEl.querySelector(".__ixl_log");
 
-        const thinkInput = panelEl.querySelector("#__ixl_think");
         const wrongInput = panelEl.querySelector("#__ixl_maxwrong");
-
-        thinkInput.addEventListener("change", () => {
-            const v = Math.max(0, Math.min(60, parseInt(thinkInput.value, 10) || 0));
-            currentPrefs.thinkSeconds = v;
-            thinkInput.value = v;
-            savePrefs(currentPrefs);
-            pushLog(`think delay = ${v}s`, "ok");
-        });
-
         wrongInput.addEventListener("change", () => {
             const v = Math.max(0, Math.min(999, parseInt(wrongInput.value, 10) || 0));
             currentPrefs.maxWrong = v;
@@ -205,7 +197,10 @@
             if (running) { wrongCount = 0; loop(); }
         });
 
-        panelEl.querySelector(".__ixl_min").addEventListener("click", () => panelEl.classList.add("__hidden"));
+        panelEl.querySelector(".__ixl_min").addEventListener("click", () => {
+            panelEl.classList.add("__hidden");
+        });
+
         window.addEventListener("keydown", (e) => {
             if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "m" || e.key === "M")) {
                 e.preventDefault(); e.stopPropagation();
@@ -215,7 +210,10 @@
     }
 
     function startWatchdog() {
-        const obs = new MutationObserver(() => { ensureStyle(); if (!document.getElementById("__ixl_panel")) buildPanel(); });
+        const obs = new MutationObserver(() => {
+            ensureStyle();
+            if (!document.getElementById("__ixl_panel")) buildPanel();
+        });
         obs.observe(document.documentElement, { childList: true, subtree: false });
     }
 
@@ -228,9 +226,9 @@
         logEl.scrollTop = logEl.scrollHeight;
         while (logEl.children.length > 30) logEl.removeChild(logEl.firstChild);
     }
+
     function setStatus(s) { if (statusEl) statusEl.textContent = "status: " + s; }
 
-    // ─── deep text extraction ─────────────────────────────
     function extractText(el) {
         if (!el) return "";
         let out = "";
@@ -247,105 +245,6 @@
         return out.replace(/\s+/g, " ").trim();
     }
 
-    // ─── universal element finders ────────────────────────
-    function findAllInteractive() {
-        const out = [];
-        const seen = new Set();
-        const selectors = [
-            "button",
-            "[role='button']",
-            "[role='radio']",
-            "[role='checkbox']",
-            "input[type='text']",
-            "input[type='number']",
-            "input:not([type])",
-            "textarea",
-            "[class*='SelectableTile']",
-            "[draggable='true']",
-            "[class*='drag']",
-            "[class*='Submit']",
-            "[class*='submit']",
-            "[aria-label]",
-            "[data-testid]"
-        ];
-        for (const sel of selectors) {
-            document.querySelectorAll(sel).forEach(el => {
-                if (seen.has(el)) return;
-                if (el.offsetParent === null) return;
-                seen.add(el);
-                out.push(el);
-            });
-        }
-        return out;
-    }
-
-    function findByText(text, exact) {
-        const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
-        const want = norm(text);
-        return findAllInteractive().find(el => {
-            const t = norm(el.innerText || el.textContent || "");
-            if (exact) return t === want;
-            return t.includes(want) || want.includes(t);
-        });
-    }
-
-    function findSubmitButton() {
-        let btn = Array.from(document.querySelectorAll("button")).find(b => {
-            const t = (b.innerText || "").trim().toLowerCase();
-            if (b.disabled) return false;
-            if (b.offsetParent === null) return false;
-            return /^submit$|^submit answer$|^check answer$|^check$|^continue$|^next$/.test(t);
-        });
-        if (btn) return btn;
-
-        btn = findAllInteractive().find(b => {
-            const t = (b.innerText || "").trim().toLowerCase();
-            if (b.disabled) return false;
-            return /^submit$|^submit answer$|^check answer$|^check$|^continue$|^next$/.test(t);
-        });
-        if (btn) return btn;
-
-        const byClass = Array.from(document.querySelectorAll('[class*="submit" i], [class*="Submit" i]')).find(b => b.offsetParent !== null);
-        if (byClass) return byClass;
-
-        return null;
-    }
-
-    function findInput() {
-        const candidates = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type]), textarea'))
-            .filter(i => !i.disabled && i.offsetParent !== null);
-        if (candidates.length) return candidates[0];
-        const ce = Array.from(document.querySelectorAll('[contenteditable="true"]')).filter(e => e.offsetParent !== null);
-        return ce[0] || null;
-    }
-
-    // ─── real mouse click sequence ────────────────────────
-    function clickViaMouse(el) {
-        if (!el) return false;
-        try { el.scrollIntoView({ block: "center", behavior: "instant" }); } catch (_) { }
-        const r = el.getBoundingClientRect();
-        const x = r.left + r.width / 2;
-        const y = r.top + r.height / 2;
-        const target = document.elementFromPoint(x, y) || el;
-
-        const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 0, pointerType: "mouse", pointerId: 1, isPrimary: true };
-        try {
-            target.dispatchEvent(new PointerEvent("pointerover", { ...opts, buttons: 0 }));
-            target.dispatchEvent(new MouseEvent("mouseover", { ...opts, buttons: 0 }));
-            target.dispatchEvent(new PointerEvent("pointermove", { ...opts, buttons: 0 }));
-            target.dispatchEvent(new MouseEvent("mousemove", { ...opts, buttons: 0 }));
-            target.dispatchEvent(new PointerEvent("pointerdown", { ...opts, buttons: 1 }));
-            target.dispatchEvent(new MouseEvent("mousedown", { ...opts, buttons: 1 }));
-            target.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 }));
-            target.dispatchEvent(new MouseEvent("mouseup", { ...opts, buttons: 0 }));
-            target.dispatchEvent(new MouseEvent("click", { ...opts, buttons: 0 }));
-        } catch (_) { }
-
-        try { el.click(); } catch (_) { }
-        return true;
-    }
-
-    // ─── parser ────────────────────────────────────────────
     function parseQuestion() {
         const tiles = Array.from(document.querySelectorAll('.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'))
             .filter(e => e.offsetParent !== null);
@@ -389,30 +288,55 @@
         else if (inputs.length > 0) type = "fill_in";
         else if (canvases.length > 0) type = "visual";
 
-        return { type, stem: stem.slice(0, 2000), options, inputs, draggables, dropZones, hasCanvas: canvases.length > 0 };
+        return {
+            type,
+            stem: stem.slice(0, 2000),
+            options,
+            inputs,
+            draggables,
+            dropZones,
+            hasCanvas: canvases.length > 0
+        };
     }
 
-    // ─── apply answer ──────────────────────────────────────
+    function clickViaMouse(el) {
+        if (!el) return false;
+        try { el.scrollIntoView({ block: "center", behavior: "instant" }); } catch (_) { }
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2;
+        const y = r.top + r.height / 2;
+        const target = document.elementFromPoint(x, y) || el;
+
+        const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 0, pointerType: "mouse", pointerId: 1, isPrimary: true };
+        try {
+            target.dispatchEvent(new PointerEvent("pointerover", { ...opts, buttons: 0 }));
+            target.dispatchEvent(new MouseEvent("mouseover", { ...opts, buttons: 0 }));
+            target.dispatchEvent(new PointerEvent("pointermove", { ...opts, buttons: 0 }));
+            target.dispatchEvent(new MouseEvent("mousemove", { ...opts, buttons: 0 }));
+            target.dispatchEvent(new PointerEvent("pointerdown", { ...opts, buttons: 1 }));
+            target.dispatchEvent(new MouseEvent("mousedown", { ...opts, buttons: 1 }));
+            target.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 }));
+            target.dispatchEvent(new MouseEvent("mouseup", { ...opts, buttons: 0 }));
+            target.dispatchEvent(new MouseEvent("click", { ...opts, buttons: 0 }));
+        } catch (_) { }
+        try { el.click(); } catch (_) { }
+        return true;
+    }
+
     function applyMultipleChoice(question, answer) {
         const idx = answer.answer_index;
         if (typeof idx !== "number") return false;
         const tiles = Array.from(document.querySelectorAll('.SelectableTile[role="radio"], [class*="SelectableTile"][role="radio"], [role="radio"]'))
             .filter(e => e.offsetParent !== null);
         const tile = tiles[idx];
-        if (!tile) {
-            const target = question.options && question.options[idx];
-            if (target) {
-                const found = findByText(target, false);
-                if (found) return clickViaMouse(found);
-            }
-            return false;
-        }
+        if (!tile) return false;
         return clickViaMouse(tile);
     }
 
     function applyFillIn(answer) {
         const value = String(answer.value ?? "");
-        const input = findInput();
+        const input = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type]), textarea'))
+            .find(i => !i.disabled && i.offsetParent !== null);
         if (!input) return false;
         try { input.scrollIntoView({ block: "center" }); } catch (_) { }
         input.focus();
@@ -421,8 +345,7 @@
         setter.call(input, value);
         input.dispatchEvent(new Event("input", { bubbles: true }));
         input.dispatchEvent(new Event("change", { bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter", keyCode: 13 }));
-        input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter", keyCode: 13 }));
+        input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
         try { input.blur(); } catch (_) { }
         return true;
     }
@@ -431,8 +354,10 @@
         const placements = answer.placements || [];
         if (!placements.length) return false;
         for (const p of placements) {
-            const tile = findByText(p.tile, true) || findByText(p.tile, false);
-            const zone = findByText(p.target, true) || findByText(p.target, false);
+            const tile = Array.from(document.querySelectorAll('[draggable="true"], [class*="draggable"]'))
+                .find(t => (t.innerText || "").trim().toLowerCase() === String(p.tile || "").toLowerCase());
+            const zone = Array.from(document.querySelectorAll('[class*="drop-zone"], [class*="dropzone"], [data-drop-target], [class*="target"]'))
+                .find(z => (z.innerText || "").trim().toLowerCase() === String(p.target || "").toLowerCase());
             if (!tile || !zone) continue;
 
             const tr = tile.getBoundingClientRect();
@@ -464,16 +389,30 @@
         return true;
     }
 
+    function findSubmitButton() {
+        let btn = Array.from(document.querySelectorAll("button")).find(b => {
+            const t = (b.innerText || "").trim().toLowerCase();
+            if (b.disabled || b.offsetParent === null) return false;
+            return /^submit$|^submit answer$|^check answer$|^check$|^continue$|^next$/.test(t);
+        });
+        if (btn) return btn;
+
+        btn = Array.from(document.querySelectorAll('[class*="submit" i], [class*="Submit" i]')).find(b => b.offsetParent !== null);
+        if (btn) return btn;
+
+        return null;
+    }
+
     function clickSubmit() {
         const btn = findSubmitButton();
-        if (!btn) { pushLog("✗ submit button not found", "err"); return false; }
-        pushLog(`submitting via "${(btn.innerText || "").trim().slice(0, 20)}"`, "ok");
+        if (!btn) { pushLog("✗ submit not found", "err"); return false; }
+        pushLog(`submitting "${(btn.innerText || "").trim().slice(0, 20)}"`, "ok");
         return clickViaMouse(btn);
     }
 
     async function askBackend(question) {
         const controller = new AbortController();
-        const to = setTimeout(() => controller.abort(), 25000);
+        const to = setTimeout(() => controller.abort(), 32000);
         try {
             const res = await fetch(`${API_BASE}/api/solve`, {
                 method: "POST",
@@ -486,17 +425,20 @@
                 throw new Error(err.error || `http ${res.status}`);
             }
             return await res.json();
-        } finally { clearTimeout(to); }
+        } finally {
+            clearTimeout(to);
+        }
     }
 
     function dismissFeedback() {
-        const el = findSubmitButton() || findByText("continue", false) || findByText("got it", false) || findByText("next", false);
-        if (el) clickViaMouse(el);
+        const btns = Array.from(document.querySelectorAll("button"));
+        const m = btns.find(b => /^(got it|continue|next|okay|ok)$/i.test((b.innerText || "").trim()) && !b.disabled);
+        if (m) clickViaMouse(m);
     }
 
     function thinkDelay() {
-        const sec = Math.max(0, currentPrefs.thinkSeconds || 0);
-        return new Promise(r => setTimeout(r, sec * 1000));
+        // fixed 5s before answering each question
+        return new Promise(r => setTimeout(r, 5000));
     }
 
     async function loop() {
@@ -521,7 +463,7 @@
                 return;
             }
 
-            setStatus(`thinking (${q.type})`);
+            setStatus(`researching (${q.type})`);
             pushLog(`q[${q.type}] ${q.stem.slice(0, 50)}`);
 
             await thinkDelay();
@@ -537,13 +479,9 @@
                 return;
             }
 
-            // ─── confidence + flags display ─────────────────
             const conf = typeof answer.confidence === "number" ? answer.confidence : null;
-            const flags = Array.isArray(answer.flags) ? answer.flags : [];
             const confStr = conf !== null ? ` conf=${conf.toFixed(2)}` : "";
-            const flagStr = flags.length ? " ⚠ " + flags.join(", ") : "";
-            const cls = conf !== null && conf < 0.5 ? "err" : conf !== null && conf < 0.75 ? "warn" : "";
-            pushLog(`ai → ${JSON.stringify(answer).slice(0, 70)}${confStr}${flagStr}`, cls);
+            pushLog(`ai → ${JSON.stringify(answer).slice(0, 70)}${confStr}`, conf !== null && conf < 0.6 ? "warn" : "ok");
 
             let ok = false;
             if (answer.type === "multiple_choice") ok = applyMultipleChoice(q, answer);
@@ -578,7 +516,7 @@
                     setStatus(`stopped: hit max wrong (${wrongCount})`);
                     toggleBtn.textContent = "▶ Start Auto";
                     toggleBtn.classList.remove("__on");
-                    pushLog(`⏹ stopped after ${wrongCount} wrong answers`, "err");
+                    pushLog(`⏹ stopped after ${wrongCount} wrong`, "err");
                     busy = false;
                     return;
                 }
@@ -603,7 +541,7 @@
         buildPanel();
         startWatchdog();
         pushLog("panel ready. click Start Auto.", "ok");
-        pushLog(`prefs: think ${currentPrefs.thinkSeconds}s, max wrong ${currentPrefs.maxWrong || "∞"}`);
+        pushLog(`max wrong = ${currentPrefs.maxWrong || "∞"}`);
     }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();

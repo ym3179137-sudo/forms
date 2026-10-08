@@ -21,36 +21,74 @@ fi
 echo "[start] chrome: $CHROME_BIN"
 
 PROFILE_DIR=/data/ixl-profile
-if [ ! -d "/data" ]; then
-  PROFILE_DIR=/tmp/ixl-profile
-fi
+if [ ! -d "/data" ]; then PROFILE_DIR=/tmp/ixl-profile; fi
 mkdir -p "$PROFILE_DIR"
 
-# ─── proxy parsing: strip credentials, pass host:port to chrome ───
+# ─── proxy handling ─────────────────────────────────────
 PROXY_ARGS=""
-PROXY_AUTH_USER=""
-PROXY_AUTH_PASS=""
-
 if [ -n "$PROXY_URL" ]; then
-  echo "[start] PROXY_URL detected, parsing..."
-  # match: scheme://user:pass@host:port
-  if [[ "$PROXY_URL" =~ ^([a-z0-9]+)://([^:@/]+):([^@/]+)@(.+)$ ]]; then
-    SCHEME="${BASH_REMATCH[1]}"
-    PROXY_AUTH_USER="${BASH_REMATCH[2]}"
-    PROXY_AUTH_PASS="${BASH_REMATCH[3]}"
-    HOSTPORT="${BASH_REMATCH[4]}"
-    PROXY_ARGS="--proxy-server=${SCHEME}://${HOSTPORT} --proxy-bypass-list=127.0.0.1;localhost"
-    echo "[start] proxy: ${SCHEME}://${HOSTPORT} (auth via CDP: user=${PROXY_AUTH_USER:0:3}***)"
-  else
-    PROXY_ARGS="--proxy-server=$PROXY_URL --proxy-bypass-list=127.0.0.1;localhost"
-    echo "[start] proxy (no auth): $PROXY_URL"
-  fi
-else
-  echo "[start] no proxy"
-fi
+  echo "[start] proxy: ${PROXY_URL%%@*}@***"
 
-export PROXY_AUTH_USER
-export PROXY_AUTH_PASS
+  # parse http(s)://user:pass@host:port
+  PROTO=$(echo "$PROXY_URL" | sed -E 's#^(https?)://.*#\1#')
+  REST=${PROXY_URL#*://}
+  CREDS=""
+  HOSTPORT="$REST"
+  if [[ "$REST" == *"@"* ]]; then
+    CREDS="${REST%%@*}"
+    HOSTPORT="${REST##*@}"
+  fi
+  PHOST="${HOSTPORT%%:*}"
+  PPORT="${HOSTPORT##*:}"
+
+  if [ -n "$CREDS" ]; then
+    PUSER="${CREDS%%:*}"
+    PPASS="${CREDS##*:}"
+    echo "[start] starting proxy auth forwarder on :8888 → $PHOST:$PPORT as $PUSER"
+    # tiny node forwarder that injects Proxy-Authorization
+    node -e "
+      const http = require('http');
+      const net = require('net');
+      const auth = 'Basic ' + Buffer.from('${PUSER}:${PPASS}').toString('base64');
+      const targetHost = '${PHOST}';
+      const targetPort = parseInt('${PPORT}', 10);
+      const srv = http.createServer();
+      srv.on('connect', (req, clientSocket, head) => {
+        const serverSocket = net.connect(targetPort, targetHost, () => {
+          clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+          serverSocket.write(head);
+          serverSocket.pipe(clientSocket);
+          clientSocket.pipe(serverSocket);
+        });
+        serverSocket.on('error', () => clientSocket.end());
+        clientSocket.on('error', () => serverSocket.end());
+      });
+      srv.on('request', (req, res) => {
+        const opts = {
+          host: targetHost,
+          port: targetPort,
+          method: req.method,
+          path: req.url,
+          headers: { ...req.headers, 'Proxy-Authorization': auth, host: req.headers.host }
+        };
+        const p = http.request(opts, (pr) => { res.writeHead(pr.statusCode, pr.headers); pr.pipe(res); });
+        p.on('error', () => res.writeHead(502).end());
+        req.pipe(p);
+      });
+      srv.listen(8888, '127.0.0.1', () => console.log('[proxy-auth] listening on :8888'));
+    " &
+    sleep 1
+    PROXY_ARGS="--proxy-server=http://127.0.0.1:8888"
+  else
+    PROXY_ARGS="--proxy-server=${PROTO}://${PHOST}:${PPORT}"
+  fi
+
+  # bypass localhost so /api/solve still reaches our node server
+  PROXY_BYPASS="--proxy-bypass-list=127.0.0.1;localhost;*.local"
+else
+  echo "[start] NO proxy — using datacenter IP (IXL may flag)"
+  PROXY_BYPASS=""
+fi
 
 SOLVE_SECRET=${SOLVE_SECRET:-dev-secret}
 
@@ -81,6 +119,7 @@ echo "[start] launching chrome..."
   --remote-debugging-address=127.0.0.1 \
   --remote-allow-origins=* \
   $PROXY_ARGS \
+  $PROXY_BYPASS \
   --app="https://www.ixl.com/signin?ixl_solver_token=${SOLVE_SECRET}" \
   --window-position=0,0 \
   --window-size=1280,720 \
@@ -91,8 +130,5 @@ echo "[start] launching chrome..."
 
 echo "[start] chrome pid: $!"
 sleep 3
-echo "[start] chrome log:"
-cat /tmp/chrome.log 2>/dev/null | head -25
-
 echo "[start] launching node server..."
 node server.js
