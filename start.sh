@@ -1,6 +1,8 @@
 #!/bin/bash
 set +e
 
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null
+
 echo "[start] booting Xvfb..."
 Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset -nolisten tcp &
 export DISPLAY=:99
