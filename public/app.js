@@ -205,13 +205,16 @@ function openVnc(wsPath) {
   showScreen("screen-session");
   const frame = el("vnc-frame");
   if (frame) {
+    // noVNC prepends its own leading slash — strip ours to avoid //
+    const cleanPath = String(wsPath).replace(/^\//, "");
+
     const params = new URLSearchParams({
       autoconnect: "1",
       resize: "scale",
       scale: "1",
       view_clip: "0",
-      path: wsPath,                    // just the path — no scheme, no host
-      host: location.hostname,         // noVNC uses this
+      path: cleanPath,
+      host: location.hostname,
       port: location.port || (location.protocol === "https:" ? "443" : "80"),
       encrypt: location.protocol === "https:" ? "1" : "0",
       reconnect: "1",
