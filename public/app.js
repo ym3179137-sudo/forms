@@ -26,7 +26,7 @@ let isOwner = false;
       setTimeout(() => {
         const urls = {
           ixl: "https://www.ixl.com/",
-          wayground: "https://wayground.com/",
+          wayground: "https://wayground.com/join",
           blooket: "https://www.blooket.com/",
           kahoot: "https://kahoot.it/",
           forms: "https://docs.google.com/forms/"
@@ -354,9 +354,10 @@ function renderLauncherGrid(allowedApps) {
   const catalog = {
     ixl: { url: "https://www.ixl.com/", icon: "📘", label: "IXL", desc: "math, reading, science" },
     blooket: { url: "https://www.blooket.com/", icon: "🎮", label: "BLOOKET", desc: "game-based review" },
-    wayground: { url: "https://wayground.com/", icon: "⚡", label: "WAYGROUND", desc: "quizzes & review" },
-    kahoot: { url: "https://kahoot.it/", icon: "🎯", label: "KAHOOT", desc: "live quiz answers" },
-    forms: { url: "https://docs.google.com/forms/", icon: "📝", label: "FORMS", desc: "google forms solver" }
+    wayground: { url: "https://wayground.com/join", icon: "⚡", label: "WAYGROUND", desc: "quizzes & review" },
+    kahoot: { url: "https://kahoot.it/", icon: "🎯", label: "KAHOOT", desc: "live quiz" },
+    forms: { url: "https://docs.google.com/forms/", icon: "📝", label: "FORMS", desc: "google forms solver" },
+    kahoot_cheat: { url: "/kahoot-cheat.html", icon: "🧠", label: "KAHOOT SOLVER", desc: "standalone answer finder", isInternal: true }
   };
 
   const allowAll = allowedApps.includes("*");
@@ -374,7 +375,11 @@ function renderLauncherGrid(allowedApps) {
             <div class="launcher-label">${app.label}</div>
             <div class="launcher-desc">${app.desc}</div>
         `;
-    btn.addEventListener("click", () => launchWithUrl(app.url, id));
+    if (app.isInternal) {
+      btn.addEventListener("click", () => window.open(app.url, "_blank"));
+    } else {
+      btn.addEventListener("click", () => launchWithUrl(app.url, id));
+    }
     grid.appendChild(btn);
   }
 
@@ -485,6 +490,7 @@ async function refreshOwnerUserList() {
                 <label><input type="checkbox" data-username="${safeUser}" data-app="blooket" ${has("blooket") ? "checked" : ""}> Blooket</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="wayground" ${has("wayground") ? "checked" : ""}> Wayground</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="kahoot" ${has("kahoot") ? "checked" : ""}> Kahoot</label>
+                <label><input type="checkbox" data-username="${safeUser}" data-app="kahoot_cheat" ${has("kahoot_cheat") ? "checked" : ""}> Kahoot Solver</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="forms" ${has("forms") ? "checked" : ""}> Forms</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="unblock" ${has("unblock") ? "checked" : ""}> Unblock</label>
             </div>
