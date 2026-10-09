@@ -120,6 +120,7 @@ app.use(async (req, res, next) => {
   req.ixlUserRecord = user;
   req.ixlIsOwner = user.role === "owner" || user.username === OWNER_USERNAME;
   req.ixlTimeLeftMs = timeLeftMs(user);
+  req.ixlToken = token;
   next();
 });
 
@@ -328,11 +329,13 @@ app.post("/api/export-dataset", async (req, res) => {
   }
 });
 
+// ─── session start ──────────────────────────────────────
 app.post("/api/session/start", async (req, res) => {
   try {
     const user = req.ixlUser;
     if (!user) return res.status(401).json({ error: "not logged in" });
     const { url } = req.body || {};
+    const userToken = req.ixlToken || "";  // ← pass user's session token into browser
 
     if (url) {
       const appId = detectAppFromUrl(url);
@@ -368,7 +371,10 @@ app.post("/api/session/start", async (req, res) => {
       });
     }
 
-    const promise = getOrCreateSession(user, { url: url || "https://www.ixl.com/" });
+    const promise = getOrCreateSession(user, {
+      url: url || "https://www.ixl.com/",
+      token: userToken
+    });
     const result = await Promise.race([
       promise.then(s => ({ ready: true, sessionId: s.sessionId })),
       new Promise(r => setTimeout(() => r({ ready: false, pending: true }), 500))
@@ -469,14 +475,12 @@ app.post("/api/navigate", async (req, res) => {
   }
 });
 
-// ─── noVNC static files: package.json fix ──────────────
-// noVNC's UI fetches this file on load. websockify doesn't serve it,
-// so we intercept it before the generic VNC proxy below.
+// ─── noVNC package.json intercept ───────────────────────
 app.get("/session/vnc/:user/package.json", (req, res) => {
   res.json({ name: "novnc", version: "1.5.0" });
 });
 
-// ─── VNC HTTP proxy (vnc.html + assets) ─────────────────
+// ─── VNC HTTP proxy ─────────────────────────────────────
 app.get("/session/vnc/:user/*", async (req, res) => {
   const username = req.params.user;
   const s = getSession(username);
@@ -553,4 +557,4 @@ server.listen(port, host, async () => {
   console.log(`[ixl-server] capacity: ${sessionStats().max} sessions`);
   try { await loadSecrets(); console.log("[ixl-server] secrets loaded"); } catch (_) { }
   try { await ensureInjected(); console.log("[ixl-server] inject started"); } catch (err) { console.error("[ixl-server] inject:", err.message); }
-});
+}); 
