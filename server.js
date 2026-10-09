@@ -469,6 +469,37 @@ app.post("/api/navigate", async (req, res) => {
   }
 });
 
+// ─── noVNC static files: package.json fix ──────────────
+// noVNC's UI fetches this file on load. websockify doesn't serve it,
+// so we intercept it before the generic VNC proxy below.
+app.get("/session/vnc/:user/package.json", (req, res) => {
+  res.json({ name: "novnc", version: "1.5.0" });
+});
+
+// ─── VNC HTTP proxy (vnc.html + assets) ─────────────────
+app.get("/session/vnc/:user/*", async (req, res) => {
+  const username = req.params.user;
+  const s = getSession(username);
+  if (!s) return res.status(404).send("no session");
+  touchSession(username);
+
+  const subPath = "/" + (req.params[0] || "");
+  const opts = {
+    method: req.method,
+    host: "127.0.0.1",
+    port: s.ports.wsPort,
+    path: subPath || "/vnc.html",
+    headers: { ...req.headers, host: `127.0.0.1:${s.ports.wsPort}` }
+  };
+  const proxyReq = http.request(opts, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+  proxyReq.on("error", () => { if (!res.headersSent) res.status(502).send("vnc err"); });
+  req.pipe(proxyReq);
+});
+
+// ─── VNC websocket proxy ────────────────────────────────
 const server = http.createServer(app);
 
 server.on("upgrade", (req, socket, head) => {
@@ -509,28 +540,6 @@ server.on("upgrade", (req, socket, head) => {
   });
   proxyReq.on("error", () => { try { socket.destroy(); } catch (_) { } });
   proxyReq.end();
-});
-
-app.get("/session/vnc/:user/*", async (req, res) => {
-  const username = req.params.user;
-  const s = getSession(username);
-  if (!s) return res.status(404).send("no session");
-  touchSession(username);
-
-  const subPath = "/" + (req.params[0] || "");
-  const opts = {
-    method: req.method,
-    host: "127.0.0.1",
-    port: s.ports.wsPort,
-    path: subPath || "/vnc.html",
-    headers: { ...req.headers, host: `127.0.0.1:${s.ports.wsPort}` }
-  };
-  const proxyReq = http.request(opts, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
-    proxyRes.pipe(res);
-  });
-  proxyReq.on("error", () => { if (!res.headersSent) res.status(502).send("vnc err"); });
-  req.pipe(proxyReq);
 });
 
 app.get("/vnc/*", (req, res) => res.status(410).send("use /session/*"));

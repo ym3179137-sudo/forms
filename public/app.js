@@ -8,6 +8,7 @@ let queueTimer = null;
 let currentSite = "ixl";
 let isOwner = false;
 
+// ─── SSO pickup from CyberVault ─────────────────────────
 (function pickUpSSO() {
   const hash = location.hash.slice(1);
   if (!hash) return;
@@ -204,8 +205,26 @@ function openVnc(wsPath) {
   showScreen("screen-session");
   const frame = el("vnc-frame");
   if (frame) {
-    const path = encodeURIComponent(wsPath);
-    frame.src = `/session/vnc/${encodeURIComponent(username)}/vnc.html?autoconnect=1&resize=scale&scale=1&view_clip=0&path=${path}&reconnect=1&reconnect_delay=500&show_dot=0&compression=4&quality=8&view_only=0&shared=1`;
+    // build an absolute WebSocket URL so noVNC doesn't guess wrong
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${proto}//${location.host}${wsPath}`;
+
+    const params = new URLSearchParams({
+      autoconnect: "1",
+      resize: "scale",
+      scale: "1",
+      view_clip: "0",
+      path: wsUrl,
+      reconnect: "1",
+      reconnect_delay: "500",
+      show_dot: "0",
+      compression: "4",
+      quality: "8",
+      view_only: "0",
+      shared: "1"
+    });
+
+    frame.src = `/session/vnc/${encodeURIComponent(username)}/vnc.html?${params.toString()}`;
     startIframeWatch();
   }
 }
