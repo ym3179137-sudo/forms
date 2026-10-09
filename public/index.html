@@ -6,16 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Study Arcade</title>
     <link rel="icon" type="image/png" href="/square_og_ixl.png" />
-    <link rel="apple-touch-icon" href="/square_og_ixl.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
     <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body>
 
-    <!-- login / signup -->
     <div class="login-wrap" id="screen-login">
         <div class="login-card">
             <h1>Study Arcade</h1>
@@ -27,30 +22,15 @@
             </div>
 
             <div id="tab-login" class="tab-panel">
-                <label>
-                    username
-                    <input type="text" id="user-input" autocomplete="username" />
-                </label>
-                <label>
-                    password
-                    <input type="password" id="pass-input" autocomplete="current-password" />
-                </label>
+                <label>username <input type="text" id="user-input" autocomplete="username" /></label>
+                <label>password <input type="password" id="pass-input" autocomplete="current-password" /></label>
                 <button id="login-submit" type="button">START</button>
             </div>
 
             <div id="tab-signup" class="tab-panel hidden">
-                <label>
-                    username
-                    <input type="text" id="signup-user" autocomplete="username" />
-                </label>
-                <label>
-                    email (optional)
-                    <input type="email" id="signup-email" autocomplete="email" />
-                </label>
-                <label>
-                    password
-                    <input type="password" id="signup-pass" autocomplete="new-password" />
-                </label>
+                <label>username <input type="text" id="signup-user" autocomplete="username" /></label>
+                <label>email (optional) <input type="email" id="signup-email" autocomplete="email" /></label>
+                <label>password <input type="password" id="signup-pass" autocomplete="new-password" /></label>
                 <button id="signup-submit" type="button">CREATE ACCOUNT</button>
             </div>
 
@@ -58,35 +38,11 @@
         </div>
     </div>
 
-    <!-- launcher -->
     <main class="launcher-wrap hidden" id="screen-launcher">
+        <button class="owner-panel-btn hidden" id="owner-panel-btn" type="button">OWNER PANEL</button>
         <h1 class="launcher-title">Study Arcade</h1>
 
-        <div class="launcher-grid">
-            <button class="launcher-btn" data-url="https://www.ixl.com/">
-                <div class="launcher-icon" style="color:#1c4980;">IXL</div>
-                <div class="launcher-label">IXL</div>
-                <div class="launcher-desc">math, reading, science</div>
-            </button>
-
-            <button class="launcher-btn" data-url="https://wayground.com/">
-                <div class="launcher-icon" style="color:#9b7dff;">⚡</div>
-                <div class="launcher-label">WAYGROUND</div>
-                <div class="launcher-desc">quizzes & review</div>
-            </button>
-
-            <button class="launcher-btn" data-url="https://www.blooket.com/">
-                <div class="launcher-icon" style="color:#ff7b3d;">🎮</div>
-                <div class="launcher-label">BLOOKET</div>
-                <div class="launcher-desc">game-based review</div>
-            </button>
-
-            <button class="launcher-btn" data-url="https://docs.google.com/forms/">
-                <div class="launcher-icon" style="color:#7ac143;">📝</div>
-                <div class="launcher-label">FORMS</div>
-                <div class="launcher-desc">google forms solver</div>
-            </button>
-        </div>
+        <div class="launcher-grid"></div>
 
         <p class="unblock-label">▶ unblock any site</p>
         <div class="unblock-bar">
@@ -101,7 +57,44 @@
         </footer>
     </main>
 
-    <!-- VNC session -->
+    <div class="queue-screen hidden" id="screen-queue">
+        <div class="queue-card">
+            <div class="queue-icon">⏳</div>
+            <h2 id="queue-main">Connecting…</h2>
+            <p id="queue-sub">Waiting for a free slot on the server</p>
+            <p class="queue-hint">Your own private browser is spinning up. This takes 5-15 seconds the first time.</p>
+            <button class="ghost" id="queue-cancel" type="button">CANCEL</button>
+        </div>
+    </div>
+
+    <div class="queue-screen hidden" id="screen-expired">
+        <div class="queue-card">
+            <div class="queue-icon" style="animation:none;">⌛</div>
+            <h2 style="color:#ff6b95;">Time's up</h2>
+            <p id="expired-message">Your access has ended.</p>
+            <p id="expired-expires" class="queue-hint"></p>
+            <p class="queue-hint">Contact the owner to add more time.</p>
+            <button class="ghost" id="expired-refresh" type="button">REFRESH</button>
+        </div>
+    </div>
+
+    <div class="queue-screen hidden" id="screen-owner">
+        <div class="owner-panel-card">
+            <div class="owner-header">
+                <h2>Owner · Users</h2>
+                <button class="ghost" id="owner-back" type="button">← Back</button>
+            </div>
+            <div class="owner-new-user">
+                <h3>Add user</h3>
+                <input id="new-user-name" placeholder="username" />
+                <input id="new-user-pass" type="password" placeholder="password" />
+                <input id="new-user-hours" type="number" placeholder="hours" value="24" />
+                <button id="new-user-submit" type="button">Create</button>
+            </div>
+            <div id="owner-user-list" class="owner-user-list"></div>
+        </div>
+    </div>
+
     <div class="session hidden" id="screen-session">
         <button class="back-btn" id="session-back" type="button">← back</button>
         <iframe id="vnc-frame" src="" allow="clipboard-read; clipboard-write"></iframe>
@@ -112,9 +105,6 @@
                 <div class="panic-line short"></div>
                 <div class="panic-line"></div>
                 <div class="panic-line shorter"></div>
-                <div class="panic-line"></div>
-                <div class="panic-line"></div>
-                <div class="panic-line short"></div>
             </div>
         </div>
     </div>

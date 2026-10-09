@@ -15,7 +15,6 @@ body {
     overflow: hidden;
 }
 
-/* ─── login / signup ──────────────────────────────────── */
 .login-wrap {
     display: flex;
     align-items: center;
@@ -31,14 +30,6 @@ body {
     border: 1px solid #1c2330;
     border-radius: 10px;
     padding: 28px;
-}
-
-.brand-logo {
-    display: block;
-    width: 56px;
-    height: 56px;
-    margin-bottom: 14px;
-    border-radius: 12px;
 }
 
 h1 {
@@ -92,7 +83,6 @@ h1 {
     display: none;
 }
 
-#login-box label,
 .tab-panel label {
     display: flex;
     flex-direction: column;
@@ -101,7 +91,6 @@ h1 {
     color: #99a;
 }
 
-#login-box input,
 .tab-panel input {
     background: #121722;
     border: 1px solid #232a3a;
@@ -113,12 +102,10 @@ h1 {
     outline: none;
 }
 
-#login-box input:focus,
 .tab-panel input:focus {
     border-color: #3a6fff;
 }
 
-#login-box button,
 .tab-panel button {
     background: linear-gradient(180deg, #2a6eff, #1d54d6);
     color: #fff;
@@ -132,12 +119,10 @@ h1 {
     margin-top: 6px;
 }
 
-#login-box button:hover,
 .tab-panel button:hover {
     filter: brightness(1.1);
 }
 
-#login-box button:disabled,
 .tab-panel button:disabled {
     opacity: 0.5;
     cursor: wait;
@@ -158,13 +143,13 @@ h1 {
     display: block;
 }
 
-/* ─── launcher ────────────────────────────────────────── */
 .launcher-wrap {
     display: flex;
     flex-direction: column;
     align-items: center;
     min-height: 100vh;
     padding: 60px 20px 24px;
+    position: relative;
 }
 
 .launcher-title {
@@ -209,33 +194,21 @@ h1 {
     border-color: #3a6fff;
 }
 
-.launcher-btn:active {
-    transform: translateY(-1px);
-}
-
 .launcher-icon {
     font-size: 42px;
-    font-weight: 900;
     line-height: 1;
-    font-family: Arial, Helvetica, sans-serif;
-    letter-spacing: -2px;
-    display: inline-flex;
-    align-items: baseline;
 }
 
 .launcher-label {
     font-size: 15px;
     font-weight: 600;
-    letter-spacing: 0.3px;
 }
 
 .launcher-desc {
     font-size: 11px;
     color: #667;
-    letter-spacing: 0.3px;
 }
 
-/* ─── unblock bar ─────────────────────────────────────── */
 .unblock-label {
     margin: 40px 0 12px;
     font-size: 11px;
@@ -283,11 +256,6 @@ h1 {
     font-family: inherit;
     font-size: 13px;
     cursor: pointer;
-    letter-spacing: 0.5px;
-}
-
-.unblock-bar button:hover {
-    filter: brightness(1.1);
 }
 
 .launcher-foot {
@@ -315,7 +283,6 @@ h1 {
     color: #8ab4ff;
 }
 
-/* ─── VNC session ────────────────────────────────────── */
 .session {
     position: fixed;
     inset: 0;
@@ -353,11 +320,6 @@ h1 {
     backdrop-filter: blur(6px);
 }
 
-.session .back-btn:hover {
-    background: rgba(40, 46, 66, 0.9);
-}
-
-/* ─── panic overlay ───────────────────────────────────── */
 .panic-overlay {
     position: fixed;
     inset: 0;
@@ -388,7 +350,6 @@ h1 {
     background: #e8eaed;
     border-radius: 4px;
     margin-bottom: 14px;
-    width: 100%;
 }
 
 .panic-line.short {
@@ -399,102 +360,239 @@ h1 {
     width: 40%;
 }
 
-/* ─── IXL creds modal ─────────────────────────────────── */
-.ixl-modal {
+.queue-screen {
     position: fixed;
     inset: 0;
-    background: rgba(8, 10, 16, 0.75);
-    backdrop-filter: blur(6px);
+    background: #0c0f17;
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 10000;
+    z-index: 9999;
     padding: 20px;
 }
 
-.ixl-modal[hidden] {
-    display: none;
+.queue-screen.hidden {
+    display: none !important;
 }
 
-.ixl-modal-card {
-    width: 100%;
-    max-width: 380px;
+.queue-card {
+    max-width: 420px;
+    padding: 40px 32px;
+    text-align: center;
     background: #10141e;
     border: 1px solid #1c2330;
-    border-radius: 10px;
-    padding: 24px;
+    border-radius: 16px;
 }
 
-.ixl-modal-card h2 {
+.queue-icon {
+    font-size: 56px;
+    margin-bottom: 16px;
+    animation: spin 2.5s linear infinite;
+    display: inline-block;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.queue-card h2 {
     margin: 0 0 8px 0;
-    font-size: 16px;
+    font-size: 20px;
     color: #8ab4ff;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
-.ixl-modal-card .sub {
-    margin: 0 0 18px 0;
-    color: #778;
-    font-size: 12px;
+.queue-card p {
+    margin: 0 0 8px 0;
+    color: #99a;
+    font-size: 13px;
+}
+
+.queue-card .queue-hint {
+    margin-top: 16px;
+    font-size: 11px;
+    color: #667;
     line-height: 1.5;
 }
 
-.ixl-modal-card label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 11px;
-    color: #99a;
-    margin-bottom: 12px;
-}
-
-.ixl-modal-card input {
-    background: #121722;
-    border: 1px solid #232a3a;
-    color: #d8dde8;
-    padding: 11px 13px;
-    border-radius: 6px;
-    font-family: inherit;
-    font-size: 14px;
-    outline: none;
-}
-
-.ixl-modal-card input:focus {
-    border-color: #3a6fff;
-}
-
-.ixl-modal-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 6px;
-}
-
-.ixl-modal-actions .ghost {
-    flex: 1;
+.queue-card button {
+    margin-top: 24px;
     background: transparent;
     border: 1px solid #232a3a;
     color: #99a;
+    padding: 8px 20px;
     border-radius: 6px;
-    padding: 11px;
-    font-family: inherit;
-    font-size: 13px;
     cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
 }
 
-.ixl-modal-actions button:not(.ghost) {
-    flex: 2;
+.queue-card button:hover {
+    border-color: #3a6fff;
+    color: #8ab4ff;
+}
+
+.owner-panel-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
     background: linear-gradient(180deg, #2a6eff, #1d54d6);
-    color: #fff;
+    color: white;
     border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    cursor: pointer;
+    z-index: 100;
+}
+
+.owner-panel-btn.hidden {
+    display: none;
+}
+
+.owner-panel-card {
+    max-width: 900px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: #10141e;
+    border: 1px solid #1c2330;
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.owner-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.owner-header h2 {
+    margin: 0;
+    font-size: 16px;
+    color: #8ab4ff;
+    font-family: ui-monospace, monospace;
+}
+
+.owner-new-user {
+    display: grid;
+    grid-template-columns: 1fr 1fr 100px 100px;
+    gap: 8px;
+    margin-bottom: 20px;
+    padding: 12px;
+    background: #0c1018;
+    border-radius: 8px;
+}
+
+.owner-new-user h3 {
+    grid-column: 1 / -1;
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: #8ab4ff;
+    font-family: ui-monospace, monospace;
+}
+
+.owner-new-user input,
+.owner-new-user button {
+    background: #121722;
+    border: 1px solid #232a3a;
+    color: #d8dde8;
+    padding: 8px 10px;
     border-radius: 6px;
-    padding: 11px;
-    font-weight: 600;
     font-family: inherit;
     font-size: 13px;
+}
+
+.owner-new-user button {
+    background: linear-gradient(180deg, #2a6eff, #1d54d6);
     cursor: pointer;
 }
 
-.ixl-modal-actions button:hover {
-    filter: brightness(1.1);
+.owner-user-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid #1c2330;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.owner-user-info {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-width: 200px;
+}
+
+.owner-user-time {
+    font-size: 11px;
+    color: #5dff7a;
+}
+
+.owner-user-role {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #2a6eff;
+    color: white;
+    text-transform: uppercase;
+}
+
+.owner-user-apps {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 12px;
+}
+
+.owner-user-apps label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.owner-user-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.owner-user-actions button {
+    background: #121722;
+    border: 1px solid #232a3a;
+    color: #d8dde8;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.owner-user-actions button:hover {
+    border-color: #2a6eff;
+    color: #8ab4ff;
+}
+
+.owner-user-actions button.danger {
+    border-color: #5a2230;
+    color: #ff8899;
+}
+
+.owner-user-actions button.danger:hover {
+    border-color: #ff3ea5;
+    background: #2a1218;
 }
 
 .hidden {

@@ -5,15 +5,25 @@ import http from "http";
 import express from "express";
 import axios from "axios";
 import { fileURLToPath } from "url";
-import { chromium } from "playwright";
-import { login, verify, signup, ssoLogin, getIxlCreds, saveIxlCreds } from "./lib/auth.js";
+import { login, verify, signup, ssoLogin, getIxlCreds, saveIxlCreds, hashPassword } from "./lib/auth.js";
 import { getAnswer } from "./lib/answer-engine.js";
 import { lookupAnswer, saveAnswer, recordWrongAnswer } from "./lib/answer-cache.js";
 import { ensureInjected } from "./lib/inject.js";
 import { loadSecrets, getSecret } from "./lib/keys.js";
+import {
+  getOrCreateSession, getSession, getQueueInfo, killSession, stats as sessionStats, touchSession
+} from "./lib/session-manager.js";
+import { safeNavigate } from "./lib/navigate-safe.js";
+import {
+  getUser, isExpired, timeLeftMs, createUser, addTime, setExpiry, setRole,
+  listUsers, deleteUser, setApps
+} from "./lib/users.js";
+import { APP_CATALOG, filterAppsForUser, userCanUseApp, detectAppFromUrl } from "./lib/apps.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
+
+const OWNER_USERNAME = process.env.OWNER_USERNAME || "yassinyassinfree";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -31,24 +41,10 @@ process.on("unhandledRejection", (err) => console.error("[unhandled]", err?.mess
 
 const OPEN_PATHS = new Set([
   "/api/health", "/api/login", "/api/signup", "/api/sso", "/api/verify",
-  "/api/solve", "/api/solve-form", "/api/feedback", "/api/navigate",
+  "/api/solve", "/api/solve-form", "/api/feedback",
   "/enter"
 ]);
 
-app.use((req, res, next) => {
-  if (OPEN_PATHS.has(req.path)) return next();
-  if (req.path.startsWith("/vnc")) return next();
-  if (req.method === "GET" && !req.path.startsWith("/api/")) return next();
-  if (req.path === "/") return next();
-  const token = req.headers["x-ixl-token"] || req.query.token;
-  verify(token).then((payload) => {
-    if (!payload) return res.status(401).json({ error: "not logged in" });
-    req.ixlUser = payload.u;
-    next();
-  }).catch(() => res.status(401).json({ error: "auth error" }));
-});
-
-// ─── auth ───────────────────────────────────────────────
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -75,15 +71,13 @@ app.post("/api/signup", async (req, res) => {
   }
 });
 
-// ─── SSO entry from CyberVault ──────────────────────────
 app.get("/enter", async (req, res) => {
   try {
     const { t, s, redirect } = req.query;
     if (!t || !s) return res.status(400).send("missing sso params");
     const result = await ssoLogin(t, s);
     if (!result.ok) return res.status(401).send("sso failed: " + result.error);
-    console.log(`[auth] sso login ${result.username} (site=${result.site})`);
-
+    console.log(`[auth] sso ${result.username} site=${result.site}`);
     const target = redirect || "/";
     const sep = target.includes("#") ? "&" : "#";
     res.redirect(`${target}${sep}sso_token=${encodeURIComponent(result.token)}&sso_user=${encodeURIComponent(result.username)}&sso_site=${encodeURIComponent(result.site || "ixl")}`);
@@ -98,20 +92,118 @@ app.get("/api/sso", async (req, res) => {
   res.redirect("/enter?" + qs);
 });
 
-app.get("/api/verify", async (req, res) => {
-  try {
-    const token = req.headers["x-ixl-token"] || req.query.token;
-    const payload = await verify(token);
-    if (!payload) return res.status(401).json({ valid: false });
-    res.json({ valid: true, username: payload.u });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+app.get("/api/health", (req, res) => res.json({ ok: true, ...sessionStats() }));
+
+app.use(async (req, res, next) => {
+  if (OPEN_PATHS.has(req.path)) return next();
+  if (req.path.startsWith("/session/")) return next();
+  if (req.method === "GET" && !req.path.startsWith("/api/")) return next();
+  if (req.path === "/") return next();
+
+  const token = req.headers["x-ixl-token"] || req.query.token;
+  const payload = await verify(token).catch(() => null);
+  if (!payload) return res.status(401).json({ error: "not logged in" });
+
+  const user = await getUser(payload.u);
+  if (!user) return res.status(401).json({ error: "user not found" });
+
+  if (isExpired(user)) {
+    return res.status(402).json({
+      error: "time_expired",
+      message: "Your time has ended. Contact the owner to add more time.",
+      username: user.username,
+      expiresAt: user.expiresAt
+    });
   }
+
+  req.ixlUser = user.username;
+  req.ixlUserRecord = user;
+  req.ixlIsOwner = user.role === "owner" || user.username === OWNER_USERNAME;
+  req.ixlTimeLeftMs = timeLeftMs(user);
+  next();
 });
 
-app.get("/api/health", (req, res) => res.json({ ok: true }));
+app.get("/api/me", async (req, res) => {
+  res.json({
+    username: req.ixlUser,
+    expiresAt: req.ixlUserRecord.expiresAt,
+    timeLeftMs: req.ixlTimeLeftMs,
+    role: req.ixlUserRecord.role,
+    isOwner: req.ixlIsOwner,
+    apps: req.ixlUserRecord.apps
+  });
+});
 
-// ─── ixl creds ──────────────────────────────────────────
+app.get("/api/my-apps", async (req, res) => {
+  const allowed = filterAppsForUser(req.ixlUserRecord);
+  res.json({ apps: allowed });
+});
+
+function requireOwner(req, res, next) {
+  if (!req.ixlIsOwner) return res.status(403).json({ error: "owner only" });
+  next();
+}
+
+app.get("/api/users", requireOwner, async (req, res) => {
+  try {
+    const users = await listUsers();
+    res.json({ users });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/users", requireOwner, async (req, res) => {
+  try {
+    const { username, password, email, hours, role, apps } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: "username and password required" });
+    const hashed = await hashPassword(password);
+    const user = await createUser(username, hashed, email || "", role || "user", hours || 24, apps || ["ixl"]);
+    res.json({ ok: true, user });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/users/:username/add-time", requireOwner, async (req, res) => {
+  try {
+    const { hours, note } = req.body || {};
+    if (!hours || hours <= 0) return res.status(400).json({ error: "invalid hours" });
+    const user = await addTime(req.params.username, hours, note || "");
+    res.json({ ok: true, user });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/users/:username/set-expiry", requireOwner, async (req, res) => {
+  try {
+    const { expiresAt } = req.body || {};
+    if (!expiresAt) return res.status(400).json({ error: "expiresAt required" });
+    const user = await setExpiry(req.params.username, expiresAt);
+    res.json({ ok: true, user });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/users/:username/role", requireOwner, async (req, res) => {
+  try {
+    const { role } = req.body || {};
+    if (!["user", "admin", "owner"].includes(role)) return res.status(400).json({ error: "bad role" });
+    const user = await setRole(req.params.username, role);
+    res.json({ ok: true, user });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/users/:username/apps", requireOwner, async (req, res) => {
+  try {
+    const { apps } = req.body || {};
+    if (!Array.isArray(apps)) return res.status(400).json({ error: "apps must be array" });
+    const user = await setApps(req.params.username, apps);
+    res.json({ ok: true, user });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/users/:username", requireOwner, async (req, res) => {
+  try {
+    await deleteUser(req.params.username);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get("/api/ixl-creds", async (req, res) => {
   try {
     const creds = await getIxlCreds(req.ixlUser);
@@ -130,7 +222,6 @@ app.post("/api/ixl-creds", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ─── solve ──────────────────────────────────────────────
 app.post("/api/solve", async (req, res) => {
   try {
     const q = req.body || {};
@@ -227,7 +318,6 @@ function parseCorrectAnswerText(text, question) {
   return null;
 }
 
-// ─── dataset export ─────────────────────────────────────
 app.post("/api/export-dataset", async (req, res) => {
   try {
     const { exportDataset } = await import("./lib/dataset-export.js");
@@ -238,40 +328,140 @@ app.post("/api/export-dataset", async (req, res) => {
   }
 });
 
-// ─── navigate ───────────────────────────────────────────
-let navBrowser = null;
+app.post("/api/session/start", async (req, res) => {
+  try {
+    const user = req.ixlUser;
+    if (!user) return res.status(401).json({ error: "not logged in" });
+    const { url } = req.body || {};
 
-async function getNavBrowser() {
-  if (navBrowser) {
-    try { await navBrowser.contexts(); return navBrowser; }
-    catch (_) { navBrowser = null; }
+    if (url) {
+      const appId = detectAppFromUrl(url);
+      if (appId) {
+        if (!userCanUseApp(req.ixlUserRecord, appId)) {
+          return res.status(403).json({ error: "app_not_allowed", app: appId });
+        }
+      } else {
+        if (!userCanUseApp(req.ixlUserRecord, "unblock")) {
+          return res.status(403).json({ error: "unblock_not_allowed" });
+        }
+      }
+    }
+
+    const existing = getSession(user);
+    if (existing) {
+      touchSession(user);
+      return res.json({
+        ok: true, ready: true,
+        wsPath: `/session/ws/${user}`,
+        sessionId: existing.sessionId
+      });
+    }
+
+    const info = getQueueInfo(user);
+    if (info.inQueue) {
+      return res.json({
+        ok: true, ready: false,
+        position: info.position,
+        totalActive: info.totalActive,
+        maxActive: info.maxActive,
+        queued: info.queued
+      });
+    }
+
+    const promise = getOrCreateSession(user, { url: url || "https://www.ixl.com/" });
+    const result = await Promise.race([
+      promise.then(s => ({ ready: true, sessionId: s.sessionId })),
+      new Promise(r => setTimeout(() => r({ ready: false, pending: true }), 500))
+    ]);
+
+    if (result.ready) {
+      touchSession(user);
+      return res.json({ ok: true, ready: true, wsPath: `/session/ws/${user}`, sessionId: result.sessionId });
+    }
+
+    promise.catch(() => { });
+    const info2 = getQueueInfo(user);
+    res.json({
+      ok: true, ready: false,
+      position: info2.position,
+      totalActive: info2.totalActive,
+      maxActive: info2.maxActive,
+      queued: info2.queued
+    });
+  } catch (err) {
+    console.error("[session/start]", err.message);
+    res.status(500).json({ error: err.message });
   }
-  navBrowser = await chromium.connectOverCDP("http://127.0.0.1:9222");
-  return navBrowser;
-}
+});
+
+app.get("/api/session/status", async (req, res) => {
+  try {
+    const user = req.ixlUser;
+    if (!user) return res.status(401).json({ error: "not logged in" });
+    const s = getSession(user);
+    if (s) {
+      touchSession(user);
+      return res.json({ ok: true, ready: true, sessionId: s.sessionId, wsPath: `/session/ws/${user}` });
+    }
+    const info = getQueueInfo(user);
+    res.json({
+      ok: true, ready: false,
+      position: info.position,
+      totalActive: info.totalActive,
+      maxActive: info.maxActive,
+      queued: info.queued
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/session/end", async (req, res) => {
+  try {
+    const user = req.ixlUser;
+    const s = getSession(user);
+    if (s) await killSession(s.sessionId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post("/api/navigate", async (req, res) => {
   const t0 = Date.now();
   try {
+    const user = req.ixlUser;
     const { url } = req.body || {};
     if (!url) return res.status(400).json({ error: "no url" });
-    if (!/^https?:\/\//i.test(url)) {
-      return res.status(400).json({ error: "only http/https allowed" });
+    if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: "only http/https allowed" });
+
+    const appId = detectAppFromUrl(url);
+    if (appId) {
+      if (!userCanUseApp(req.ixlUserRecord, appId)) {
+        return res.status(403).json({ error: "app_not_allowed", app: appId });
+      }
+    } else {
+      if (!userCanUseApp(req.ixlUserRecord, "unblock")) {
+        return res.status(403).json({ error: "unblock_not_allowed" });
+      }
     }
-    console.log(`[navigate] → ${url}`);
 
-    const browser = await getNavBrowser();
-    const contexts = browser.contexts();
-    if (!contexts.length) return res.status(503).json({ error: "no context" });
+    const s = getSession(user);
+    if (!s) return res.status(409).json({ error: "no active session" });
 
-    const context = contexts[0];
-    const pages = context.pages();
-    const page = pages[0] || await context.newPage();
+    touchSession(user);
 
-    page.goto(url, { waitUntil: "commit", timeout: 30000 })
-      .catch((err) => console.warn(`[navigate] goto warning: ${err.message.slice(0, 100)}`));
+    if (s.browser === "firefox") {
+      return res.status(200).json({
+        ok: true,
+        unsupported: true,
+        reason: "firefox_manual",
+        message: "Firefox sessions navigate manually — open the URL in the VNC window."
+      });
+    }
 
-    console.log(`[navigate] dispatched in ${Date.now() - t0}ms`);
+    await safeNavigate(s.debugUrl, url, s.browser);
+    console.log(`[navigate] ${user} → ${url} (${Date.now() - t0}ms)`);
     res.json({ ok: true, dispatched: Date.now() - t0 });
   } catch (err) {
     console.error("[navigate]", err.message);
@@ -279,28 +469,31 @@ app.post("/api/navigate", async (req, res) => {
   }
 });
 
-// ─── VNC proxy ──────────────────────────────────────────
-app.get("/vnc/package.json", (req, res) => res.json({ name: "novnc", version: "1.5.0" }));
-
-app.use("/vnc", (req, res) => {
-  const targetPath = req.url === "/" ? "/vnc.html" : req.url;
-  const opts = { method: req.method, host: "127.0.0.1", port: 6080, path: targetPath, headers: { ...req.headers, host: "127.0.0.1:6080" } };
-  const proxyReq = http.request(opts, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
-    proxyRes.pipe(res);
-  });
-  proxyReq.on("error", () => { if (!res.headersSent) res.status(502).send("vnc err"); });
-  req.pipe(proxyReq);
-});
-
 const server = http.createServer(app);
 
 server.on("upgrade", (req, socket, head) => {
-  if (!req.url.startsWith("/vnc/websockify")) return socket.destroy();
-  const backendPath = req.url.replace(/^\/vnc/, "") || "/websockify";
-  const headers = { ...req.headers, host: "127.0.0.1:6080" };
+  const m = req.url.match(/^\/session\/ws\/([^/?]+)/);
+  if (!m) return socket.destroy();
+  const username = decodeURIComponent(m[1]);
+  const s = getSession(username);
+  if (!s) {
+    socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+    return socket.destroy();
+  }
+  touchSession(username);
+
+  const backendPath = "/websockify";
+  const headers = { ...req.headers, host: `127.0.0.1:${s.ports.wsPort}` };
   delete headers["content-length"];
-  const proxyReq = http.request({ host: "127.0.0.1", port: 6080, method: "GET", path: backendPath, headers });
+
+  const proxyReq = http.request({
+    host: "127.0.0.1",
+    port: s.ports.wsPort,
+    method: "GET",
+    path: backendPath,
+    headers
+  });
+
   proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
     socket.write("HTTP/1.1 101 Switching Protocols\r\n");
     for (const [k, v] of Object.entries(proxyRes.headers)) {
@@ -318,15 +511,37 @@ server.on("upgrade", (req, socket, head) => {
   proxyReq.end();
 });
 
+app.get("/session/vnc/:user/*", async (req, res) => {
+  const username = req.params.user;
+  const s = getSession(username);
+  if (!s) return res.status(404).send("no session");
+  touchSession(username);
+
+  const subPath = "/" + (req.params[0] || "");
+  const opts = {
+    method: req.method,
+    host: "127.0.0.1",
+    port: s.ports.wsPort,
+    path: subPath || "/vnc.html",
+    headers: { ...req.headers, host: `127.0.0.1:${s.ports.wsPort}` }
+  };
+  const proxyReq = http.request(opts, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+  proxyReq.on("error", () => { if (!res.headersSent) res.status(502).send("vnc err"); });
+  req.pipe(proxyReq);
+});
+
+app.get("/vnc/*", (req, res) => res.status(410).send("use /session/*"));
+app.get("/vnc", (req, res) => res.status(410).send("use /session/*"));
+
 const port = process.env.PORT || config.server.port || 3000;
 const host = process.env.PORT ? "0.0.0.0" : (config.server.host || "127.0.0.1");
 
 server.listen(port, host, async () => {
   console.log(`[ixl-server] http://${host}:${port}`);
+  console.log(`[ixl-server] capacity: ${sessionStats().max} sessions`);
   try { await loadSecrets(); console.log("[ixl-server] secrets loaded"); } catch (_) { }
   try { await ensureInjected(); console.log("[ixl-server] inject started"); } catch (err) { console.error("[ixl-server] inject:", err.message); }
-  try {
-    const { warmup } = await import("./lib/warmup.js");
-    await warmup();
-  } catch (_) { }
 });
