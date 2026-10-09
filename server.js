@@ -26,7 +26,7 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "
 const OWNER_USERNAME = process.env.OWNER_USERNAME || "yassinyassinfree";
 
 const app = express();
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "10mb" }));
 app.use("/api", (req, res, next) => {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Headers", "Content-Type, X-IXL-Token");
@@ -45,6 +45,7 @@ const OPEN_PATHS = new Set([
   "/enter"
 ]);
 
+// ─── auth ───────────────────────────────────────────────
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -94,6 +95,7 @@ app.get("/api/sso", async (req, res) => {
 
 app.get("/api/health", (req, res) => res.json({ ok: true, ...sessionStats() }));
 
+// ─── auth gate ──────────────────────────────────────────
 app.use(async (req, res, next) => {
   if (OPEN_PATHS.has(req.path)) return next();
   if (req.path.startsWith("/session/")) return next();
@@ -124,6 +126,7 @@ app.use(async (req, res, next) => {
   next();
 });
 
+// ─── self info ──────────────────────────────────────────
 app.get("/api/me", async (req, res) => {
   res.json({
     username: req.ixlUser,
@@ -140,6 +143,7 @@ app.get("/api/my-apps", async (req, res) => {
   res.json({ apps: allowed });
 });
 
+// ─── owner: users CRUD ──────────────────────────────────
 function requireOwner(req, res, next) {
   if (!req.ixlIsOwner) return res.status(403).json({ error: "owner only" });
   next();
@@ -205,6 +209,7 @@ app.delete("/api/users/:username", requireOwner, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── ixl creds ──────────────────────────────────────────
 app.get("/api/ixl-creds", async (req, res) => {
   try {
     const creds = await getIxlCreds(req.ixlUser);
@@ -223,6 +228,7 @@ app.post("/api/ixl-creds", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── solve ──────────────────────────────────────────────
 app.post("/api/solve", async (req, res) => {
   try {
     const q = req.body || {};
@@ -319,7 +325,8 @@ function parseCorrectAnswerText(text, question) {
   return null;
 }
 
-app.post("/api/export-dataset", async (req, res) => {
+// ─── dataset export ─────────────────────────────────────
+app.post("/api/export-dataset", requireOwner, async (req, res) => {
   try {
     const { exportDataset } = await import("./lib/dataset-export.js");
     const result = await exportDataset();
@@ -329,13 +336,226 @@ app.post("/api/export-dataset", async (req, res) => {
   }
 });
 
-// ─── session start ──────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// HUMANIZE — rewrite AI text to sound human
+// ═══════════════════════════════════════════════════════
+app.post("/api/humanize", async (req, res) => {
+  try {
+    const { text, tone, intensity } = req.body || {};
+    if (!text || text.length < 20) {
+      return res.status(400).json({ error: "text too short" });
+    }
+
+    const toneMap = {
+      casual: "casual, like you're texting a friend or posting on Reddit",
+      professional: "professional but human — like a competent person writing an email, not a corporate press release",
+      academic: "academic but human — like a grad student explaining their work to a peer, not a textbook",
+      neutral: "neutral, natural, like a thoughtful blog post by an actual person"
+    };
+    const toneDesc = toneMap[tone] || toneMap.neutral;
+
+    const intensityMap = {
+      light: "Light touch. Only fix the obvious robotic patterns.",
+      medium: "Medium rewrite. Change sentence structure meaningfully while keeping ideas intact.",
+      heavy: "Heavy rewrite. Rework most sentences. Add human rhythm even if it means restructuring paragraphs."
+    };
+    const intensityDesc = intensityMap[intensity] || intensityMap.medium;
+
+    const sys = `You rewrite AI-generated text so it reads like a real human wrote it. This is not paraphrasing — it's re-humanizing.
+
+RULES:
+1. Keep the meaning exactly the same. Do not add facts, opinions, or examples.
+2. Match this tone: ${toneDesc}
+3. ${intensityDesc}
+
+BANNED words/phrases — never use these:
+"delve", "navigating", "landscape", "tapestry", "testament", "furthermore", "moreover",
+"in conclusion", "it's important to note", "it's worth noting", "in today's world",
+"in the realm of", "when it comes to", "at the end of the day", "let's dive in",
+"let's unpack", "more than just", "not just", "pave the way", "stands as", "serves as",
+"plays a crucial role", "plays a vital role", "a myriad of", "a plethora of",
+"leverage", "robust", "seamless", "cutting-edge", "game-changer", "unlock the potential",
+"embark on", "uncover", "shed light on", "shed light", "pave the way for".
+
+BANNED patterns:
+- Sentences that all start the same way
+- Every paragraph being exactly 3-5 sentences
+- Perfect parallel structure across lists
+- "Not only X, but also Y" constructions
+- Em-dashes used as rhythmic pauses (— every other sentence)
+- Perfectly balanced "on one hand... on the other hand"
+- Any sentence that ends with a neat summary clause
+
+REQUIRED patterns (do these):
+- Mix very short sentences (2-4 words) with longer ones (25-40 words). Aim for high variance.
+- Use contractions: don't, it's, you're, we've, can't, won't, that's.
+- Start some sentences with And, But, So, Or — real people do this.
+- Use casual connectors: "the thing is", "honestly", "look", "here's the deal", "truth is", "anyway", "so yeah", "at least", "though"
+- Include a hedge or two: "kind of", "sort of", "I think", "probably", "maybe", "roughly"
+- Let one sentence run on a bit longer than it should, with a comma splice or a trailing "which is..."
+- Use "you" and "I" where it fits naturally. First-person is human.
+- Break one "rule" once — start a sentence with a lowercase word if it feels right, or use a fragment. Real writers do.
+- Vary paragraph length. One paragraph can be a single sentence.
+
+OUTPUT: Return ONLY the rewritten text. No preamble, no explanation, no quotes around it.`;
+
+    const geminiKey = await getSecret("GEMINI_API_KEY");
+    const groqKey = await getSecret("GROQ_API_KEY");
+    const openrouterKey = await getSecret("OPENROUTER_API_KEY");
+
+    const providers = [
+      { name: "gemini", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: geminiKey, models: ["gemini-2.5-flash", "gemini-flash-latest"] },
+      { name: "groq", baseURL: "https://api.groq.com/openai/v1", apiKey: groqKey, models: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"] },
+      { name: "openrouter", baseURL: "https://openrouter.ai/api/v1", apiKey: openrouterKey, models: ["openrouter/free"] }
+    ];
+
+    let lastErr = null;
+    for (const p of providers) {
+      if (!p.apiKey || /PUT_|your_/i.test(p.apiKey)) continue;
+      for (const model of p.models) {
+        try {
+          const r = await axios.post(p.baseURL.replace(/\/$/, "") + "/chat/completions", {
+            model,
+            messages: [
+              { role: "system", content: sys },
+              { role: "user", content: text }
+            ],
+            temperature: 0.95,
+            top_p: 0.95,
+            max_tokens: 4000
+          }, {
+            headers: { Authorization: "Bearer " + p.apiKey, "Content-Type": "application/json" },
+            timeout: 45000,
+            validateStatus: s => s < 500
+          });
+          if (r.status >= 400) throw new Error(`http ${r.status}`);
+          const out = (r.data?.choices?.[0]?.message?.content || "").trim();
+          if (!out) throw new Error("empty response");
+          let cleaned = out.replace(/^["']([\s\S]*)["']$/, "$1").trim();
+          return res.json({
+            text: cleaned,
+            source: `${p.name}/${model}`,
+            tone: tone || "neutral",
+            intensity: intensity || "medium"
+          });
+        } catch (err) {
+          lastErr = err;
+          console.warn(`[humanize] ${p.name}/${model} failed: ${err.message}`);
+        }
+      }
+    }
+    res.status(500).json({ error: lastErr?.message || "all providers failed" });
+  } catch (err) {
+    console.error("[humanize]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// AI-LIKELIHOOD CHECKER — heuristic score 0-100
+// ═══════════════════════════════════════════════════════
+app.post("/api/ai-check", async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || text.length < 20) return res.status(400).json({ error: "text too short" });
+
+    const signals = [];
+    let score = 0;
+
+    const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+    const words = text.trim().split(/\s+/);
+    const wordCount = words.length;
+    const sentenceCount = sentences.length;
+
+    // 1. Burstiness — variance in sentence length
+    const lens = sentences.map(s => s.split(/\s+/).length);
+    const avgLen = lens.reduce((a, b) => a + b, 0) / (lens.length || 1);
+    const variance = lens.reduce((acc, l) => acc + Math.pow(l - avgLen, 2), 0) / (lens.length || 1);
+    const stdev = Math.sqrt(variance);
+    const burstiness = stdev / (avgLen || 1);
+    if (burstiness < 0.4) { score += 20; signals.push(`Low burstiness (${burstiness.toFixed(2)}) — sentences are too uniform in length`); }
+    else if (burstiness < 0.55) { score += 10; signals.push(`Moderate burstiness (${burstiness.toFixed(2)}) — could use more variation`); }
+    else { signals.push(`Good burstiness (${burstiness.toFixed(2)}) — sentence length varies naturally`); }
+
+    // 2. Banned phrases
+    const banned = [
+      "delve", "navigating", "landscape", "tapestry", "testament", "furthermore",
+      "moreover", "in conclusion", "it's important to note", "it's worth noting",
+      "in today's world", "in the realm of", "when it comes to", "let's dive",
+      "more than just", "not just", "pave the way", "stands as", "serves as",
+      "a myriad of", "a plethora of", "leverage", "robust", "seamless",
+      "cutting-edge", "game-changer", "unlock the potential", "embark on",
+      "uncover", "shed light on"
+    ];
+    const lowerText = text.toLowerCase();
+    const foundBanned = banned.filter(b => lowerText.includes(b));
+    if (foundBanned.length > 0) {
+      score += Math.min(30, foundBanned.length * 8);
+      signals.push(`Contains ${foundBanned.length} AI-tell phrase(s): ${foundBanned.slice(0, 5).join(", ")}`);
+    } else {
+      signals.push("No obvious AI-tell phrases detected");
+    }
+
+    // 3. Contractions
+    const contractionCount = (lowerText.match(/\b\w+'(s|t|re|ve|ll|d|m)\b/g) || []).length;
+    const contractionRate = contractionCount / (wordCount || 1);
+    if (contractionRate < 0.01) { score += 15; signals.push("Very few contractions — human writing almost always has some"); }
+    else if (contractionRate < 0.02) { score += 5; signals.push("Some contractions, could use more"); }
+    else { signals.push("Good contraction usage"); }
+
+    // 4. First/second person pronouns
+    const youWe = (lowerText.match(/\b(i|i'm|i've|i'll|you|you're|we|we're|we've|my|our|your)\b/g) || []).length;
+    const youWeRate = youWe / (wordCount || 1);
+    if (youWeRate < 0.005) { score += 10; signals.push("No first/second person — feels distant and report-like"); }
+    else { signals.push("Uses first/second person — feels personal"); }
+
+    // 5. Casual connectors
+    const casual = ["honestly", "look,", "the thing is", "here's the deal", "truth is", "anyway", "so yeah", "at least", "though", "kind of", "sort of", "pretty much", "a bit"];
+    const casualCount = casual.filter(c => lowerText.includes(c)).length;
+    if (casualCount === 0) { score += 10; signals.push("No casual connectors — sounds like a manual"); }
+    else { signals.push(`Found ${casualCount} casual connector(s)`); }
+
+    // 6. Sentence starting variety
+    const starts = sentences.map(s => s.trim().split(/\s+/)[0]?.toLowerCase() || "").filter(Boolean);
+    const uniqueStarts = new Set(starts).size;
+    const startVariety = uniqueStarts / (starts.length || 1);
+    if (startVariety < 0.6) { score += 10; signals.push(`Sentences start too similarly (${uniqueStarts}/${starts.length} unique)`); }
+    else { signals.push("Good variety in sentence openings"); }
+
+    if (wordCount < 40) signals.push("Text is short — heuristics are less reliable under 40 words");
+
+    score = Math.max(0, Math.min(100, score));
+
+    let verdict = "Likely human";
+    if (score >= 60) verdict = "Likely AI-generated";
+    else if (score >= 35) verdict = "Mixed signals — could pass as human but risky";
+    else if (score >= 20) verdict = "Probably human";
+
+    res.json({
+      score,
+      verdict,
+      signals,
+      meta: {
+        wordCount,
+        sentenceCount,
+        avgLen: avgLen.toFixed(1),
+        burstiness: burstiness.toFixed(2)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// SESSION start / status / end
+// ═══════════════════════════════════════════════════════
 app.post("/api/session/start", async (req, res) => {
   try {
     const user = req.ixlUser;
     if (!user) return res.status(401).json({ error: "not logged in" });
     const { url } = req.body || {};
-    const userToken = req.ixlToken || "";  // ← pass user's session token into browser
+    const userToken = req.ixlToken || "";
 
     if (url) {
       const appId = detectAppFromUrl(url);
@@ -353,6 +573,14 @@ app.post("/api/session/start", async (req, res) => {
     const existing = getSession(user);
     if (existing) {
       touchSession(user);
+      if (url && existing.browser !== "firefox") {
+        try {
+          await safeNavigate(existing.debugUrl, url, existing.browser);
+          console.log(`[session/start] navigated existing ${user} → ${url}`);
+        } catch (err) {
+          console.warn(`[session/start] navigate existing: ${err.message}`);
+        }
+      }
       return res.json({
         ok: true, ready: true,
         wsPath: `/session/ws/${user}`,
@@ -433,6 +661,7 @@ app.post("/api/session/end", async (req, res) => {
   }
 });
 
+// ─── navigate inside own session ────────────────────────
 app.post("/api/navigate", async (req, res) => {
   const t0 = Date.now();
   try {
@@ -546,9 +775,11 @@ server.on("upgrade", (req, socket, head) => {
   proxyReq.end();
 });
 
+// ─── legacy VNC paths ───────────────────────────────────
 app.get("/vnc/*", (req, res) => res.status(410).send("use /session/*"));
 app.get("/vnc", (req, res) => res.status(410).send("use /session/*"));
 
+// ─── boot ───────────────────────────────────────────────
 const port = process.env.PORT || config.server.port || 3000;
 const host = process.env.PORT ? "0.0.0.0" : (config.server.host || "127.0.0.1");
 
@@ -557,4 +788,4 @@ server.listen(port, host, async () => {
   console.log(`[ixl-server] capacity: ${sessionStats().max} sessions`);
   try { await loadSecrets(); console.log("[ixl-server] secrets loaded"); } catch (_) { }
   try { await ensureInjected(); console.log("[ixl-server] inject started"); } catch (err) { console.error("[ixl-server] inject:", err.message); }
-}); 
+});
