@@ -205,16 +205,15 @@ function openVnc(wsPath) {
   showScreen("screen-session");
   const frame = el("vnc-frame");
   if (frame) {
-    // build an absolute WebSocket URL so noVNC doesn't guess wrong
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${proto}//${location.host}${wsPath}`;
-
     const params = new URLSearchParams({
       autoconnect: "1",
       resize: "scale",
       scale: "1",
       view_clip: "0",
-      path: wsUrl,
+      path: wsPath,                    // just the path — no scheme, no host
+      host: location.hostname,         // noVNC uses this
+      port: location.port || (location.protocol === "https:" ? "443" : "80"),
+      encrypt: location.protocol === "https:" ? "1" : "0",
       reconnect: "1",
       reconnect_delay: "500",
       show_dot: "0",
