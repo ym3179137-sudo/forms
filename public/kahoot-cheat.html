@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kahoot Solver</title>
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+        .kh-wrap {
+            max-width: 620px;
+            margin: 40px auto;
+            padding: 24px;
+        }
+
+        .kh-title {
+            font-family: ui-monospace, monospace;
+            font-size: 22px;
+            color: #ffcc00;
+            margin: 0 0 8px 0;
+            letter-spacing: 1px;
+        }
+
+        .kh-sub {
+            color: #99a;
+            font-size: 13px;
+            margin: 0 0 24px 0;
+            line-height: 1.6;
+        }
+
+        .kh-label {
+            display: block;
+            font-size: 11px;
+            color: #8ab4ff;
+            margin: 16px 0 6px 0;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-family: ui-monospace, monospace;
+        }
+
+        .kh-input,
+        .kh-textarea {
+            width: 100%;
+            background: #121722;
+            border: 1px solid #232a3a;
+            color: #d8dde8;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-family: ui-monospace, monospace;
+            font-size: 13px;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        .kh-input:focus,
+        .kh-textarea:focus {
+            border-color: #ffcc00;
+        }
+
+        .kh-textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .kh-options {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            margin-top: 6px;
+        }
+
+        .kh-option-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .kh-shape {
+            width: 42px;
+            height: 42px;
+            flex: 0 0 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            border-radius: 6px;
+            color: #000;
+            font-weight: bold;
+        }
+
+        .kh-shape.red {
+            background: #e21b3c;
+            color: #fff;
+        }
+
+        .kh-shape.blue {
+            background: #1368ce;
+            color: #fff;
+        }
+
+        .kh-shape.yellow {
+            background: #d89e00;
+            color: #fff;
+        }
+
+        .kh-shape.green {
+            background: #26890c;
+            color: #fff;
+        }
+
+        .kh-option-row input {
+            flex: 1;
+        }
+
+        .kh-btn {
+            margin-top: 20px;
+            width: 100%;
+            background: linear-gradient(180deg, #ffcc00, #e69900);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            padding: 14px;
+            font-family: ui-monospace, monospace;
+            font-size: 14px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            cursor: pointer;
+        }
+
+        .kh-btn:disabled {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
+        .kh-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+        }
+
+        .kh-result {
+            margin-top: 24px;
+            padding: 20px;
+            border: 1px solid #232a3a;
+            border-radius: 10px;
+            background: #10141e;
+            display: none;
+        }
+
+        .kh-result.visible {
+            display: block;
+        }
+
+        .kh-result .kh-answer-shape {
+            display: inline-flex;
+            width: 72px;
+            height: 72px;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            border-radius: 12px;
+            margin-right: 16px;
+            vertical-align: middle;
+        }
+
+        .kh-result .kh-answer-text {
+            display: inline-block;
+            vertical-align: middle;
+            font-family: ui-monospace, monospace;
+            font-size: 16px;
+            color: #fff;
+            line-height: 1.4;
+            max-width: 400px;
+        }
+
+        .kh-result .kh-meta {
+            margin-top: 14px;
+            font-size: 12px;
+            color: #99a;
+            font-family: ui-monospace, monospace;
+        }
+
+        .kh-error {
+            margin-top: 14px;
+            background: #2a1218;
+            border: 1px solid #5a2230;
+            color: #ff8899;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .kh-error.visible {
+            display: block;
+        }
+
+        .kh-back {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #8ab4ff;
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            text-decoration: none;
+        }
+
+        .kh-back:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="kh-wrap">
+        <a href="/" class="kh-back">← back to launcher</a>
+
+        <h1 class="kh-title">KAHOOT SOLVER</h1>
+        <p class="kh-sub">
+            Paste the question from the Kahoot host screen.<br>
+            Fill in the 4 options in the order they appear (red triangle, blue diamond, yellow circle, green
+            square).<br>
+            The solver tells you which shape to tap on your phone/device.
+        </p>
+
+        <label class="kh-label">Question</label>
+        <textarea id="kh-question" class="kh-textarea" placeholder="Type or paste the question text"></textarea>
+
+        <label class="kh-label">Options</label>
+        <div class="kh-options">
+            <div class="kh-option-row">
+                <div class="kh-shape red">▲</div>
+                <input id="kh-opt-0" class="kh-input" placeholder="Red triangle answer text" />
+            </div>
+            <div class="kh-option-row">
+                <div class="kh-shape blue">◆</div>
+                <input id="kh-opt-1" class="kh-input" placeholder="Blue diamond answer text" />
+            </div>
+            <div class="kh-option-row">
+                <div class="kh-shape yellow">●</div>
+                <input id="kh-opt-2" class="kh-input" placeholder="Yellow circle answer text" />
+            </div>
+            <div class="kh-option-row">
+                <div class="kh-shape green">■</div>
+                <input id="kh-opt-3" class="kh-input" placeholder="Green square answer text" />
+            </div>
+        </div>
+
+        <button id="kh-solve" class="kh-btn">SOLVE</button>
+
+        <div id="kh-error" class="kh-error"></div>
+
+        <div id="kh-result" class="kh-result">
+            <div id="kh-answer-shape" class="kh-answer-shape"></div>
+            <div id="kh-answer-text" class="kh-answer-text"></div>
+            <div class="kh-meta" id="kh-meta"></div>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem("ixl_token") || "";
+
+        const SHAPES = [
+            { symbol: "▲", name: "Red Triangle", cls: "red", bg: "#e21b3c" },
+            { symbol: "◆", name: "Blue Diamond", cls: "blue", bg: "#1368ce" },
+            { symbol: "●", name: "Yellow Circle", cls: "yellow", bg: "#d89e00" },
+            { symbol: "■", name: "Green Square", cls: "green", bg: "#26890c" }
+        ];
+
+        function el(id) { return document.getElementById(id); }
+
+        function setError(msg) {
+            const box = el("kh-error");
+            if (msg) { box.textContent = msg; box.classList.add("visible"); }
+            else { box.textContent = ""; box.classList.remove("visible"); }
+        }
+
+        el("kh-solve").addEventListener("click", async () => {
+            const question = el("kh-question").value.trim();
+            const options = [0, 1, 2, 3].map(i => el("kh-opt-" + i).value.trim());
+
+            if (!question || question.length < 3) {
+                setError("Enter the question.");
+                return;
+            }
+            if (options.some(o => !o)) {
+                setError("Fill all 4 options.");
+                return;
+            }
+
+            setError("");
+            el("kh-result").classList.remove("visible");
+
+            const btn = el("kh-solve");
+            btn.disabled = true;
+            btn.textContent = "SOLVING…";
+
+            try {
+                const res = await fetch("/api/solve", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-IXL-Token": token },
+                    body: JSON.stringify({
+                        type: "multiple_choice",
+                        stem: question,
+                        options: options
+                    })
+                });
+
+                if (res.status === 401) throw new Error("Not logged in — go back to launcher and sign in.");
+                if (res.status === 402) throw new Error("Your time has ended. Ask the owner for more time.");
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    throw new Error(d.error || ("http " + res.status));
+                }
+
+                const answer = await res.json();
+                const idx = answer.answer_index;
+                if (typeof idx !== "number" || idx < 0 || idx > 3) {
+                    throw new Error("Solver returned invalid answer index: " + JSON.stringify(answer).slice(0, 80));
+                }
+
+                const shape = SHAPES[idx];
+                const shapeEl = el("kh-answer-shape");
+                shapeEl.className = "kh-answer-shape";
+                shapeEl.style.background = shape.bg;
+                shapeEl.style.color = "#fff";
+                shapeEl.textContent = shape.symbol;
+
+                el("kh-answer-text").textContent = options[idx];
+
+                const src = answer.source || "ai";
+                const conf = typeof answer.confidence === "number" ? (answer.confidence * 100).toFixed(0) + "%" : "n/a";
+                el("kh-meta").textContent = "TAP " + shape.name.toUpperCase() + " · " + src + " · " + conf + " confidence";
+
+                el("kh-result").classList.add("visible");
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "SOLVE";
+            }
+        });
+    </script>
+</body>
+
+</html>
