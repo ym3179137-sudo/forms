@@ -28,6 +28,7 @@ let isOwner = false;
           ixl: "https://www.ixl.com/",
           wayground: "https://wayground.com/",
           blooket: "https://www.blooket.com/",
+          kahoot: "https://kahoot.it/",
           forms: "https://docs.google.com/forms/"
         };
         const target = urls[ssoSite.toLowerCase()];
@@ -127,6 +128,7 @@ async function launchWithUrl(targetUrl, site) {
   if (launched) return;
   launched = true;
   currentSite = site || "custom";
+  console.log("[launch]", targetUrl, site);
 
   showScreen("screen-queue");
   setQueueText("Connecting…", "Waiting for a free slot on the server");
@@ -205,9 +207,7 @@ function openVnc(wsPath) {
   showScreen("screen-session");
   const frame = el("vnc-frame");
   if (frame) {
-    // noVNC prepends its own leading slash — strip ours to avoid //
-    const cleanPath = String(wsPath).replace(/^\//, "");
-
+    const cleanPath = String(wsPath).replace(/^\/+/, "");
     const params = new URLSearchParams({
       autoconnect: "1",
       resize: "scale",
@@ -225,15 +225,20 @@ function openVnc(wsPath) {
       view_only: "0",
       shared: "1"
     });
-
     frame.src = `/session/vnc/${encodeURIComponent(username)}/vnc.html?${params.toString()}`;
     startIframeWatch();
   }
 }
 
-function backToLauncher() {
+async function backToLauncher() {
   launched = false;
   if (queueTimer) { clearInterval(queueTimer); queueTimer = null; }
+  try {
+    await fetch("/api/session/end", {
+      method: "POST",
+      headers: { "X-IXL-Token": token }
+    });
+  } catch (_) { }
   const frame = el("vnc-frame");
   if (frame) frame.src = "";
   showScreen("screen-launcher");
@@ -350,6 +355,7 @@ function renderLauncherGrid(allowedApps) {
     ixl: { url: "https://www.ixl.com/", icon: "📘", label: "IXL", desc: "math, reading, science" },
     blooket: { url: "https://www.blooket.com/", icon: "🎮", label: "BLOOKET", desc: "game-based review" },
     wayground: { url: "https://wayground.com/", icon: "⚡", label: "WAYGROUND", desc: "quizzes & review" },
+    kahoot: { url: "https://kahoot.it/", icon: "🎯", label: "KAHOOT", desc: "live quiz answers" },
     forms: { url: "https://docs.google.com/forms/", icon: "📝", label: "FORMS", desc: "google forms solver" }
   };
 
@@ -478,6 +484,7 @@ async function refreshOwnerUserList() {
                 <label><input type="checkbox" data-username="${safeUser}" data-app="ixl" ${has("ixl") ? "checked" : ""}> IXL</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="blooket" ${has("blooket") ? "checked" : ""}> Blooket</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="wayground" ${has("wayground") ? "checked" : ""}> Wayground</label>
+                <label><input type="checkbox" data-username="${safeUser}" data-app="kahoot" ${has("kahoot") ? "checked" : ""}> Kahoot</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="forms" ${has("forms") ? "checked" : ""}> Forms</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="unblock" ${has("unblock") ? "checked" : ""}> Unblock</label>
             </div>
