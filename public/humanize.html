@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Humanize Text</title>
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+        .hz-wrap {
+            max-width: 1080px;
+            margin: 40px auto;
+            padding: 24px;
+        }
+
+        .hz-title {
+            font-family: ui-monospace, monospace;
+            font-size: 22px;
+            color: #a35bff;
+            margin: 0 0 6px 0;
+            letter-spacing: 1px;
+        }
+
+        .hz-sub {
+            color: #99a;
+            font-size: 13px;
+            margin: 0 0 24px 0;
+            line-height: 1.6;
+        }
+
+        .hz-label {
+            display: block;
+            font-size: 11px;
+            color: #8ab4ff;
+            margin: 16px 0 6px 0;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-family: ui-monospace, monospace;
+        }
+
+        .hz-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .hz-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .hz-textarea {
+            width: 100%;
+            min-height: 380px;
+            background: #121722;
+            border: 1px solid #232a3a;
+            color: #d8dde8;
+            padding: 14px;
+            border-radius: 8px;
+            font-family: ui-monospace, monospace;
+            font-size: 13px;
+            line-height: 1.55;
+            outline: none;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+
+        .hz-textarea:focus {
+            border-color: #a35bff;
+        }
+
+        .hz-opts {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .hz-opt {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #99a;
+            font-family: ui-monospace, monospace;
+        }
+
+        .hz-opt select {
+            background: #121722;
+            border: 1px solid #232a3a;
+            color: #d8dde8;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 12px;
+            outline: none;
+        }
+
+        .hz-opt select:focus {
+            border-color: #a35bff;
+        }
+
+        .hz-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .hz-btn {
+            background: linear-gradient(180deg, #a35bff, #7a3ad6);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 22px;
+            font-family: ui-monospace, monospace;
+            font-size: 13px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            cursor: pointer;
+        }
+
+        .hz-btn:disabled {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
+        .hz-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+        }
+
+        .hz-btn.ghost {
+            background: transparent;
+            border: 1px solid #232a3a;
+            color: #99a;
+        }
+
+        .hz-btn.ghost:hover:not(:disabled) {
+            border-color: #a35bff;
+            color: #a35bff;
+        }
+
+        .hz-btn.check {
+            background: linear-gradient(180deg, #5dff7a, #2e8f42);
+        }
+
+        .hz-btn.check:hover:not(:disabled) {
+            filter: brightness(1.1);
+        }
+
+        .hz-meta {
+            margin-left: auto;
+            font-size: 11px;
+            color: #667;
+            font-family: ui-monospace, monospace;
+        }
+
+        .hz-error {
+            margin-top: 14px;
+            background: #2a1218;
+            border: 1px solid #5a2230;
+            color: #ff8899;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .hz-error.visible {
+            display: block;
+        }
+
+        .hz-report {
+            margin-top: 20px;
+            padding: 18px;
+            background: #10141e;
+            border: 1px solid #1c2330;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .hz-report.visible {
+            display: block;
+        }
+
+        .hz-score {
+            font-family: ui-monospace, monospace;
+            font-size: 26px;
+            margin: 0 0 4px 0;
+        }
+
+        .hz-score.good {
+            color: #5dff7a;
+        }
+
+        .hz-score.warn {
+            color: #ffcc00;
+        }
+
+        .hz-score.bad {
+            color: #ff6b95;
+        }
+
+        .hz-verdict {
+            font-family: ui-monospace, monospace;
+            font-size: 13px;
+            color: #aab;
+            margin-bottom: 14px;
+        }
+
+        .hz-signals {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.7;
+            color: #99a;
+            font-family: ui-monospace, monospace;
+        }
+
+        .hz-signals li {
+            padding: 4px 0 4px 20px;
+            position: relative;
+        }
+
+        .hz-signals li::before {
+            content: "•";
+            position: absolute;
+            left: 6px;
+            color: #8ab4ff;
+        }
+
+        .hz-back {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #8ab4ff;
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            text-decoration: none;
+        }
+
+        .hz-back:hover {
+            text-decoration: underline;
+        }
+
+        .hz-stat {
+            color: #5dff7a;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="hz-wrap">
+        <a href="/" class="hz-back">← back to launcher</a>
+
+        <h1 class="hz-title">HUMANIZE TEXT</h1>
+        <p class="hz-sub">
+            Paste AI text on the left. Rewrite it on the right. Click CHECK to see a rough AI-likelihood score
+            before you use the text. No tool guarantees 100% undetectable, but this catches the obvious tells.
+        </p>
+
+        <div class="hz-grid">
+            <div>
+                <label class="hz-label">Input (AI text)</label>
+                <textarea id="hz-in" class="hz-textarea" placeholder="Paste AI text here…"></textarea>
+            </div>
+            <div>
+                <label class="hz-label">Output (humanized)</label>
+                <textarea id="hz-out" class="hz-textarea" placeholder="Rewritten text appears here…"></textarea>
+            </div>
+        </div>
+
+        <div class="hz-opts">
+            <label class="hz-opt">Tone:
+                <select id="hz-tone">
+                    <option value="neutral">Neutral</option>
+                    <option value="casual">Casual</option>
+                    <option value="professional">Professional</option>
+                    <option value="academic">Academic</option>
+                </select>
+            </label>
+            <label class="hz-opt">Intensity:
+                <select id="hz-intensity">
+                    <option value="light">Light</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="heavy">Heavy</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="hz-controls">
+            <button id="hz-run" class="hz-btn">HUMANIZE</button>
+            <button id="hz-check" class="hz-btn check" disabled>CHECK AI-LIKELIHOOD</button>
+            <button id="hz-copy" class="hz-btn ghost" disabled>COPY OUTPUT</button>
+            <button id="hz-clear" class="hz-btn ghost">CLEAR</button>
+            <span class="hz-meta" id="hz-meta"></span>
+        </div>
+
+        <div id="hz-error" class="hz-error"></div>
+
+        <div id="hz-report" class="hz-report">
+            <div id="hz-score" class="hz-score">—</div>
+            <div id="hz-verdict" class="hz-verdict"></div>
+            <ul id="hz-signals" class="hz-signals"></ul>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem("ixl_token") || "";
+        const el = (id) => document.getElementById(id);
+
+        function setError(msg) {
+            const box = el("hz-error");
+            if (msg) { box.textContent = msg; box.classList.add("visible"); }
+            else { box.textContent = ""; box.classList.remove("visible"); }
+        }
+        function setMeta(msg) { el("hz-meta").textContent = msg || ""; }
+        function hideReport() { el("hz-report").classList.remove("visible"); }
+
+        async function callApi(path, body) {
+            const res = await fetch(path, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-IXL-Token": token },
+                body: JSON.stringify(body)
+            });
+            if (res.status === 401) throw new Error("Not logged in — go back to launcher and sign in.");
+            if (res.status === 402) throw new Error("Your access time has ended. Ask the owner for more time.");
+            if (!res.ok) {
+                const d = await res.json().catch(() => ({}));
+                throw new Error(d.error || ("http " + res.status));
+            }
+            return await res.json();
+        }
+
+        el("hz-run").addEventListener("click", async () => {
+            const input = el("hz-in").value.trim();
+            if (!input) { setError("Paste some text first."); return; }
+            if (input.length < 20) { setError("Text is too short to rewrite meaningfully."); return; }
+
+            setError("");
+            hideReport();
+            el("hz-out").value = "";
+            el("hz-copy").disabled = true;
+            el("hz-check").disabled = true;
+
+            const btn = el("hz-run");
+            btn.disabled = true;
+            btn.textContent = "WORKING…";
+            const t0 = Date.now();
+
+            try {
+                const tone = el("hz-tone").value;
+                const intensity = el("hz-intensity").value;
+                const r = await callApi("/api/humanize", { text: input, tone, intensity });
+                el("hz-out").value = r.text;
+                el("hz-copy").disabled = false;
+                el("hz-check").disabled = false;
+                const took = ((Date.now() - t0) / 1000).toFixed(1);
+                setMeta(`<span class="hz-stat">done</span> · ${took}s · ${r.source} · ${r.tone}/${r.intensity}`);
+            } catch (err) {
+                setError(err.message);
+                setMeta("");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "HUMANIZE";
+            }
+        });
+
+        el("hz-check").addEventListener("click", async () => {
+            const out = el("hz-out").value.trim();
+            if (!out) { setError("Humanize first, or paste text to check."); return; }
+
+            setError("");
+            const btn = el("hz-check");
+            btn.disabled = true;
+            btn.textContent = "CHECKING…";
+
+            try {
+                const r = await callApi("/api/ai-check", { text: out });
+                const scoreEl = el("hz-score");
+                scoreEl.textContent = r.score + " / 100";
+                scoreEl.className = "hz-score";
+                if (r.score >= 60) scoreEl.classList.add("bad");
+                else if (r.score >= 35) scoreEl.classList.add("warn");
+                else scoreEl.classList.add("good");
+
+                el("hz-verdict").textContent = r.verdict +
+                    ` · ${r.meta.wordCount} words · ${r.meta.sentenceCount} sentences · avg ${r.meta.avgLen} words · burstiness ${r.meta.burstiness}`;
+
+                const ul = el("hz-signals");
+                ul.innerHTML = "";
+                r.signals.forEach(s => {
+                    const li = document.createElement("li");
+                    li.textContent = s;
+                    ul.appendChild(li);
+                });
+
+                el("hz-report").classList.add("visible");
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "CHECK AI-LIKELIHOOD";
+            }
+        });
+
+        el("hz-copy").addEventListener("click", async () => {
+            const text = el("hz-out").value;
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                const btn = el("hz-copy");
+                btn.textContent = "COPIED!";
+                setTimeout(() => { btn.textContent = "COPY OUTPUT"; }, 1200);
+            } catch (_) {
+                el("hz-out").select();
+                document.execCommand("copy");
+            }
+        });
+
+        el("hz-clear").addEventListener("click", () => {
+            el("hz-in").value = "";
+            el("hz-out").value = "";
+            el("hz-copy").disabled = true;
+            el("hz-check").disabled = true;
+            setError("");
+            setMeta("");
+            hideReport();
+        });
+
+        el("hz-in").addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                el("hz-run").click();
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -29,10 +29,14 @@ let isOwner = false;
           wayground: "https://wayground.com/join",
           blooket: "https://www.blooket.com/",
           kahoot: "https://kahoot.it/",
-          forms: "https://docs.google.com/forms/"
+          forms: "https://docs.google.com/forms/",
+          humanize: "/humanize.html"
         };
         const target = urls[ssoSite.toLowerCase()];
-        if (target) launchWithUrl(target, ssoSite.toLowerCase());
+        if (target) {
+          if (ssoSite.toLowerCase() === "humanize") window.open(target, "_blank");
+          else launchWithUrl(target, ssoSite.toLowerCase());
+        }
       }, 400);
     }
   }
@@ -357,7 +361,8 @@ function renderLauncherGrid(allowedApps) {
     wayground: { url: "https://wayground.com/join", icon: "⚡", label: "WAYGROUND", desc: "quizzes & review" },
     kahoot: { url: "https://kahoot.it/", icon: "🎯", label: "KAHOOT", desc: "live quiz" },
     forms: { url: "https://docs.google.com/forms/", icon: "📝", label: "FORMS", desc: "google forms solver" },
-    kahoot_cheat: { url: "/kahoot-cheat.html", icon: "🧠", label: "KAHOOT SOLVER", desc: "standalone answer finder", isInternal: true }
+    kahoot_cheat: { url: "/kahoot-cheat.html", icon: "🧠", label: "KAHOOT SOLVER", desc: "standalone answer finder", isInternal: true },
+    humanize: { url: "/humanize.html", icon: "✍️", label: "HUMANIZE", desc: "rewrite AI text", isInternal: true }
   };
 
   const allowAll = allowedApps.includes("*");
@@ -492,6 +497,7 @@ async function refreshOwnerUserList() {
                 <label><input type="checkbox" data-username="${safeUser}" data-app="kahoot" ${has("kahoot") ? "checked" : ""}> Kahoot</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="kahoot_cheat" ${has("kahoot_cheat") ? "checked" : ""}> Kahoot Solver</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="forms" ${has("forms") ? "checked" : ""}> Forms</label>
+                <label><input type="checkbox" data-username="${safeUser}" data-app="humanize" ${has("humanize") ? "checked" : ""}> Humanize</label>
                 <label><input type="checkbox" data-username="${safeUser}" data-app="unblock" ${has("unblock") ? "checked" : ""}> Unblock</label>
             </div>
             <div class="owner-user-actions">

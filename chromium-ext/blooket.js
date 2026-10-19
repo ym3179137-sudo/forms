@@ -1,253 +1,172 @@
-(function () {
-    if (window.__blooket_injected__) return;
-    window.__blooket_injected__ = true;
+(() => {
+    if (!window.location.hostname.includes("blooket.com")) return;
+    if (window.__blooket_injected) return;
+    window.__blooket_injected = true;
 
-    const API_BASE = "";
-    let token = "";
-    try {
-        const m = location.search.match(/[?&]ixl_solver_token=([^&]+)/);
-        if (m) { token = decodeURIComponent(m[1]); sessionStorage.setItem("__ixl_tok", token); }
-        else { token = sessionStorage.getItem("__ixl_tok") || ""; }
-    } catch (_) { }
-
-    const css = `
-    #__bk_panel { position: fixed; top: 16px; right: 16px; width: 320px; background: rgba(18,22,34,0.97); color: #d8dde8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid rgba(120,140,200,0.35); border-radius: 10px; padding: 10px; z-index: 2147483647; box-shadow: 0 8px 32px rgba(0,0,0,0.5); user-select: none; }
-    #__bk_panel.__hidden { display: none !important; }
-    #__bk_panel .__bk_header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    #__bk_panel .__bk_title { font-weight: 600; color: #9d6cff; letter-spacing: 0.5px; }
-    #__bk_panel .__bk_min { background: transparent; border: none; color: #889; cursor: pointer; font-size: 14px; padding: 0 4px; }
-    #__bk_panel .__bk_toggle { width: 100%; background: linear-gradient(180deg,#9d6cff,#6f42d4); color: #fff; border: none; border-radius: 6px; padding: 9px 10px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
-    #__bk_panel .__bk_toggle.__on { background: linear-gradient(180deg,#d64545,#a83232); }
-    #__bk_panel .__bk_status { margin-top: 8px; color: #aab; font-size: 11px; }
-    #__bk_panel .__bk_log { margin-top: 6px; max-height: 180px; overflow-y: auto; font-size: 10px; color: #889; line-height: 1.5; }
-    #__bk_panel .__bk_log div { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
-    #__bk_panel .__bk_log .ok { color: #6d8; }
-    #__bk_panel .__bk_log .err { color: #d67; }
-  `;
-
-    let running = false;
-    let panelEl = null, statusEl = null, logEl = null, toggleBtn = null;
-    let busy = false;
-    let lastAnsweredSig = "";
-
-    function ensureStyle() {
-        if (document.getElementById("__bk_style")) return;
-        const s = document.createElement("style");
-        s.id = "__bk_style";
-        s.textContent = css;
-        document.documentElement.appendChild(s);
-    }
-
-    function pushLog(text, cls) {
-        if (!logEl) return;
-        const d = document.createElement("div");
-        if (cls) d.className = cls;
-        d.textContent = text;
-        logEl.appendChild(d);
-        logEl.scrollTop = logEl.scrollHeight;
-        while (logEl.children.length > 30) logEl.removeChild(logEl.firstChild);
-    }
-    function setStatus(s) { if (statusEl) statusEl.textContent = "status: " + s; }
-
-    // ─── read the current blooket question ─────────────────
-    function parseQuestion() {
-        // blooket question text lives in specific containers depending on game mode
-        const stemEl =
-            document.querySelector('[class*="questionText"]') ||
-            document.querySelector('[class*="QuestionText"]') ||
-            document.querySelector('h2[class*="Question"]') ||
-            document.querySelector('[class*="question__"]');
-
-        let stem = stemEl ? (stemEl.innerText || "").trim() : "";
-        if (!stem) {
-            const candidates = Array.from(document.querySelectorAll("h1, h2, h3, p, div"))
-                .filter(e => e.offsetParent !== null && e.children.length < 5);
-            let longest = "";
-            for (const c of candidates) {
-                const t = (c.innerText || "").trim();
-                if (t.length > longest.length && t.length < 500) longest = t;
+    // 1. Block Anti-Cheat Telemetry
+    if (window.fetch && window.fetch.call.toString().includes("[native code]")) {
+        const origCall = window.fetch.call;
+        window.fetch.call = function () {
+            const url = arguments[0] || "";
+            if (typeof url === "string" && url.includes("s.blooket.com/rc")) {
+                console.log("[cheat] Blocked Blooket report");
+                return Promise.resolve(new Response(JSON.stringify({ success: true })));
             }
-            stem = longest;
-        }
-
-        // blooket answer buttons — usually <button> children of a specific container
-        const optionEls = Array.from(document.querySelectorAll(
-            '[class*="answerContainer"] button, [class*="answer"] button, [class*="answerButton"], [class*="Answer"] button, button[class*="answer"]'
-        )).filter(e => e.offsetParent !== null);
-
-        const options = optionEls.map(e => (e.innerText || "").trim()).filter(Boolean);
-
-        let type = options.length >= 2 ? "multiple_choice" : "unknown";
-        return { type, stem: stem.slice(0, 1500), options };
+            return origCall.apply(this, arguments);
+        };
     }
 
-    function clickElement(el) {
-        if (!el) return false;
-        try { el.scrollIntoView({ block: "center", behavior: "instant" }); } catch (_) { }
-        const r = el.getBoundingClientRect();
-        const x = r.left + r.width / 2;
-        const y = r.top + r.height / 2;
-        const target = document.elementFromPoint(x, y) || el;
-        const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
+    // 2. Safe React State Node Extractor
+    function getStateNode() {
         try {
-            target.dispatchEvent(new PointerEvent("pointerover", opts));
-            target.dispatchEvent(new MouseEvent("mouseover", opts));
-            target.dispatchEvent(new PointerEvent("pointerdown", { ...opts, buttons: 1 }));
-            target.dispatchEvent(new MouseEvent("mousedown", { ...opts, buttons: 1 }));
-            target.dispatchEvent(new PointerEvent("pointerup", opts));
-            target.dispatchEvent(new MouseEvent("mouseup", opts));
-            target.dispatchEvent(new MouseEvent("click", opts));
-        } catch (_) { }
-        try { el.click(); } catch (_) { }
-        return true;
+            const root = document.querySelector("#app > div > div") || document.querySelector("body > div");
+            if (!root) return null;
+            const fiberKey = Object.keys(root).find(k => k.startsWith("__reactFiber$"));
+            if (!fiberKey) return null;
+            
+            let fiber = root[fiberKey];
+            while (fiber) {
+                if (fiber.stateNode && fiber.stateNode.props && fiber.stateNode.props.liveGameController) {
+                    return fiber.stateNode;
+                }
+                fiber = fiber.child || fiber.sibling;
+            }
+        } catch (e) { return null; }
+        return null;
     }
 
-    function applyAnswer(question, answer) {
-        if (answer.type !== "multiple_choice" || typeof answer.answer_index !== "number") return false;
-        const optionEls = Array.from(document.querySelectorAll(
-            '[class*="answerContainer"] button, [class*="answer"] button, [class*="answerButton"], [class*="Answer"] button, button[class*="answer"]'
-        )).filter(e => e.offsetParent !== null);
-        const el = optionEls[answer.answer_index];
-        if (!el) return false;
-        return clickElement(el);
-    }
-
-    async function askBackend(q) {
-        const controller = new AbortController();
-        const to = setTimeout(() => controller.abort(), 32000);
-        try {
-            const res = await fetch(`${API_BASE}/api/solve`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-IXL-Token": token },
-                body: JSON.stringify(q),
-                signal: controller.signal
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `http ${res.status}`);
-            }
-            return await res.json();
-        } finally { clearTimeout(to); }
-    }
-
-    // blooket answers should be fast but not instant — otherwise flagged
-    function humanDelay() {
-        return new Promise(r => setTimeout(r, 400 + Math.random() * 800));
-    }
-
-    async function loop() {
-        if (!running || busy) return;
-        busy = true;
-        try {
-            setStatus("reading question");
-            const q = parseQuestion();
-
-            if (!q.stem || q.stem.length < 5 || q.type !== "multiple_choice") {
-                setStatus("no question yet");
-                busy = false;
-                setTimeout(loop, 500);
-                return;
-            }
-
-            const sig = q.stem + "|" + q.options.join("|");
-            if (sig === lastAnsweredSig) {
-                setStatus("waiting for next");
-                busy = false;
-                setTimeout(loop, 700);
-                return;
-            }
-
-            setStatus("thinking");
-            pushLog(`q ${q.stem.slice(0, 50)}`);
-
-            let answer;
-            try {
-                answer = await askBackend(q);
-            } catch (err) {
-                pushLog("✗ " + err.message, "err");
-                busy = false;
-                setTimeout(loop, 1200);
-                return;
-            }
-
-            pushLog(`ai → idx ${answer.answer_index}`, "ok");
-
-            await humanDelay();
-
-            const ok = applyAnswer(q, answer);
-            if (ok) {
-                lastAnsweredSig = sig;
-                pushLog("✓ clicked", "ok");
-            } else {
-                pushLog("✗ could not click", "err");
-            }
-
-            busy = false;
-            if (running) setTimeout(loop, 400);
-        } catch (err) {
-            pushLog("loop error: " + err.message, "err");
-            busy = false;
-            if (running) setTimeout(loop, 700);
-        }
-    }
-
-    function buildPanel() {
-        if (document.getElementById("__bk_panel")) return;
-        panelEl = document.createElement("div");
-        panelEl.id = "__bk_panel";
-        panelEl.innerHTML = `
-      <div class="__bk_header">
-        <span class="__bk_title">blooket-solver</span>
-        <button class="__bk_min" title="Ctrl+M">–</button>
-      </div>
-      <button class="__bk_toggle">▶ Start Auto</button>
-      <div class="__bk_status">status: idle</div>
-      <div class="__bk_log"></div>
+    // 3. Build the UI
+    const panel = document.createElement("div");
+    panel.id = "__bk_panel";
+    panel.style = `
+        position: fixed; top: 20px; right: 20px; width: 300px; 
+        background: rgba(15, 23, 42, 0.95); color: #fff; 
+        border: 2px solid #3b82f6; border-radius: 12px; 
+        font-family: 'Nunito', sans-serif; z-index: 999999; 
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5); padding: 15px;
     `;
-        document.documentElement.appendChild(panelEl);
+    
+    let html = `<h2 style="margin: 0 0 10px 0; text-align: center; color: #60a5fa; font-size: 18px;">Blooket Cheats</h2>`;
+    
+    const cheats = [
+        { name: "Set Gold", id: "gold", input: true },
+        { name: "Set Crypto", id: "crypto", input: true },
+        { name: "Set Doubloons", id: "doubloons", input: true },
+        { name: "Auto Answer", id: "autoanswer" },
+        { name: "Highlight Answers", id: "highlight" },
+        { name: "Get Daily Rewards", id: "rewards" },
+        { name: "Flood Lobby", id: "flood", input: true },
+        { name: "Crash Host", id: "crash" }
+    ];
 
-        toggleBtn = panelEl.querySelector(".__bk_toggle");
-        statusEl = panelEl.querySelector(".__bk_status");
-        logEl = panelEl.querySelector(".__bk_log");
-
-        toggleBtn.addEventListener("click", () => {
-            running = !running;
-            statusEl.textContent = "status: " + (running ? "solving" : "idle");
-            toggleBtn.textContent = running ? "■ Stop Auto" : "▶ Start Auto";
-            toggleBtn.classList.toggle("__on", running);
-            pushLog(running ? "auto started" : "auto paused", running ? "ok" : "");
-            if (running) loop();
-        });
-
-        panelEl.querySelector(".__bk_min").addEventListener("click", () => panelEl.classList.add("__hidden"));
-
-        window.addEventListener("keydown", (e) => {
-            if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "m" || e.key === "M")) {
-                e.preventDefault(); e.stopPropagation();
-                panelEl.classList.toggle("__hidden");
-            }
-        }, true);
-    }
-
-    function boot() {
-        ensureStyle();
-        buildPanel();
-        pushLog("blooket panel ready. click Start Auto.", "ok");
-        const obs = new MutationObserver(() => {
-            ensureStyle();
-            if (!document.getElementById("__bk_panel")) buildPanel();
-        });
-        obs.observe(document.documentElement, { childList: true, subtree: false });
-    }
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
-    else boot();
-
-    let lastUrl = location.href;
-    setInterval(() => {
-        if (location.href !== lastUrl) {
-            lastUrl = location.href;
-            ensureStyle();
-            buildPanel();
+    cheats.forEach(c => {
+        if (c.input) {
+            html += `<div style="display: flex; gap: 5px; margin-bottom: 8px;">
+                <input id="bk-input-${c.id}" type="text" placeholder="${c.name}" style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #475569; background: #1e293b; color: #fff; outline: none;">
+                <button id="bk-btn-${c.id}" style="padding: 8px 12px; background: #3b82f6; color: #fff; border: none; border-radius: 6px; cursor: pointer;">Set</button>
+            </div>`;
+        } else {
+            html += `<button id="bk-btn-${c.id}" style="width: 100%; padding: 10px; margin-bottom: 8px; background: #3b82f6; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">${c.name}</button>`;
         }
-    }, 1000);
+    });
+
+    html += `<button id="bk-btn-close" style="width: 100%; padding: 8px; margin-top: 10px; background: #ef4444; color: #fff; border: none; border-radius: 6px; cursor: pointer;">Close</button>`;
+    panel.innerHTML = html;
+    document.body.appendChild(panel);
+
+    document.getElementById("bk-btn-close").onclick = () => panel.remove();
+
+    // 4. Cheat Implementations
+
+    function handleInput(id, callback) {
+        document.getElementById(`bk-btn-${id}`).onclick = () => {
+            const val = document.getElementById(`bk-input-${id}`).value;
+            if (val) callback(val);
+        };
+    }
+
+    handleInput("gold", (val) => {
+        const sn = getStateNode();
+        if (sn) { sn.setState({ gold: parseInt(val) }); sn.props.liveGameController.setVal({ path: `c/${sn.props.client.name}/g`, val: parseInt(val) }); }
+    });
+
+    handleInput("crypto", (val) => {
+        const sn = getStateNode();
+        if (sn) { sn.setState({ crypto: parseInt(val) }); sn.props.liveGameController.setVal({ path: `c/${sn.props.client.name}/cr`, val: parseInt(val) }); }
+    });
+
+    handleInput("doubloons", (val) => {
+        const sn = getStateNode();
+        if (sn) { sn.setState({ doubloons: parseInt(val) }); sn.props.liveGameController.setVal({ path: `c/${sn.props.client.name}/d`, val: parseInt(val) }); }
+    });
+
+    document.getElementById("bk-btn-autoanswer").onclick = () => {
+        if (window.__bk_autoanswer) {
+            clearInterval(window.__bk_autoanswer);
+            window.__bk_autoanswer = null;
+            alert("Auto Answer disabled");
+        } else {
+            window.__bk_autoanswer = setInterval(() => {
+                const sn = getStateNode();
+                if (!sn || !sn.state || !sn.state.question) return;
+                const q = sn.state.question;
+                if (q.qType === "typing") {
+                    const input = document.querySelector("[class*='typingAnswerWrapper'] input");
+                    if (input) { input.value = q.answers[0]; input.dispatchEvent(new Event('input', { bubbles: true })); }
+                } else {
+                    const answers = document.querySelectorAll("[class*='answerContainer']");
+                    answers.forEach((el, i) => { if (q.correctAnswers.includes(q.answers[i])) el.click(); });
+                }
+            }, 500);
+            alert("Auto Answer enabled");
+        }
+    };
+
+    document.getElementById("bk-btn-highlight").onclick = () => {
+        const sn = getStateNode();
+        if (!sn || !sn.state || !sn.state.question) return;
+        const q = sn.state.question;
+        document.querySelectorAll("[class*='answerContainer']").forEach((el, i) => {
+            el.style.backgroundColor = q.correctAnswers.includes(q.answers[i]) ? "#22c55e" : "#ef4444";
+        });
+    };
+
+    document.getElementById("bk-btn-rewards").onclick = async () => {
+        try {
+            const res = await fetch("https://play.blooket.com/api/playersessions/solo", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ gameMode: "Factory", questionSetId: "5fac96fe2ca0da00042b018f" })
+            }).then(r => r.json());
+            await fetch("https://play.blooket.com/api/users/add-rewards", {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ t: res.t, addedTokens: 500, addedXp: 300 })
+            });
+            alert("Daily rewards claimed!");
+        } catch (e) { alert("Error claiming rewards"); }
+    };
+
+    handleInput("flood", (val) => {
+        const sn = getStateNode();
+        if (!sn || !sn.props.liveGameController) return;
+        const gameId = sn.props.client.hostId;
+        const name = val;
+        fetch("https://fb.blooket.com/c/firebase/join", {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: gameId, name: name })
+        }).then(r => r.json()).then(data => {
+            if (data.success) {
+                const fb = sn.props.liveGameController._liveApp;
+                fb.auth().signInWithCustomToken(data.fbToken).then(() => {
+                    fb.database().ref(`${gameId}/c/${name}`).set({ b: "Chick", bg: "starter" });
+                });
+            }
+        });
+    });
+
+    document.getElementById("bk-btn-crash").onclick = () => {
+        const sn = getStateNode();
+        if (sn) sn.props.liveGameController.setVal({ path: `c/${sn.props.client.name}/b/toString`, val: "Crashed" });
+    };
+
+    console.log("[cheat] Blooket injected and ready");
 })();

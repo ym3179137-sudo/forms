@@ -11,7 +11,7 @@ import { lookupAnswer, saveAnswer, recordWrongAnswer } from "./lib/answer-cache.
 import { ensureInjected } from "./lib/inject.js";
 import { loadSecrets, getSecret } from "./lib/keys.js";
 import {
-  getOrCreateSession, getSession, getQueueInfo, killSession, stats as sessionStats, touchSession
+  startSession, getSession, getQueueInfo, killSession, stats as sessionStats, touchSession
 } from "./lib/session-manager.js";
 import { safeNavigate } from "./lib/navigate-safe.js";
 import {
@@ -26,6 +26,7 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "
 const OWNER_USERNAME = process.env.OWNER_USERNAME || "yassinyassinfree";
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "10mb" }));
 app.use("/api", (req, res, next) => {
   res.set("Access-Control-Allow-Origin", "*");
@@ -39,37 +40,59 @@ app.use(express.static(path.join(__dirname, "public")));
 process.on("uncaughtException", (err) => console.error("[uncaught]", err.message));
 process.on("unhandledRejection", (err) => console.error("[unhandled]", err?.message || err));
 
+// ─── rate limiting ──────────────────────────────────────
+const rateLimits = new Map();
+function rateLimit(windowMs, maxRequests) {
+  return (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    let entry = rateLimits.get(ip);
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 0, resetAt: now + windowMs };
+      rateLimits.set(ip, entry);
+    }
+    entry.count++;
+    if (entry.count > maxRequests) {
+      return res.status(429).json({ error: "too many requests" });
+    }
+    next();
+  };
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateLimits) if (now > v.resetAt) rateLimits.delete(k);
+}, 60000);
+
+// ─── SSRF guard ─────────────────────────────────────────
+function isSafeUrl(raw) {
+  try {
+    const u = new URL(raw);
+    if (!["http:", "https:"].includes(u.protocol)) return false;
+    const host = u.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1") return false;
+    if (/^127\./.test(host)) return false;
+    if (/^10\./.test(host)) return false;
+    if (/^192\.168\./.test(host)) return false;
+    if (/^169\.254\./.test(host)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+    if (/^(fc|fd|fe80)/i.test(host)) return false;
+    return true;
+  } catch { return false; }
+}
+
 const OPEN_PATHS = new Set([
   "/api/health", "/api/login", "/api/signup", "/api/sso", "/api/verify",
-  "/api/solve", "/api/solve-form", "/api/feedback",
-  "/enter"
+  "/api/feedback", "/enter"
 ]);
 
 // ─── auth ───────────────────────────────────────────────
-app.post("/api/login", async (req, res) => {
-  try {
-    const { username, password } = req.body || {};
-    const token = await login(username, password);
-    if (!token) return res.status(401).json({ error: "invalid username or password" });
-    console.log(`[auth] ${username} logged in`);
-    res.json({ token, username });
-  } catch (err) {
-    console.error("[login]", err.message);
-    res.status(500).json({ error: err.message });
-  }
+// Direct login is DISABLED. All logins go through CyberVault's SSO.
+app.post("/api/login", rateLimit(60 * 1000, 10), async (req, res) => {
+  return res.status(410).json({ error: "Direct login disabled. Sign in via CyberVault." });
 });
 
-app.post("/api/signup", async (req, res) => {
-  try {
-    const { username, password, email } = req.body || {};
-    const result = await signup(username, password, email);
-    if (!result.ok) return res.status(400).json({ error: result.error });
-    console.log(`[auth] signup ${username}`);
-    res.json({ token: result.token, username: result.username });
-  } catch (err) {
-    console.error("[signup]", err.message);
-    res.status(500).json({ error: err.message });
-  }
+app.post("/api/signup", rateLimit(60 * 1000, 10), async (req, res) => {
+  return res.status(410).json({ error: "Sign up at CyberVault, not here." });
 });
 
 app.get("/enter", async (req, res) => {
@@ -77,8 +100,11 @@ app.get("/enter", async (req, res) => {
     const { t, s, redirect } = req.query;
     if (!t || !s) return res.status(400).send("missing sso params");
     const result = await ssoLogin(t, s);
-    if (!result.ok) return res.status(401).send("sso failed: " + result.error);
-    console.log(`[auth] sso ${result.username} site=${result.site}`);
+    if (!result.ok) {
+      console.log(`[sso] rejected: ${result.error}`);
+      return res.status(401).send("sso failed: " + result.error);
+    }
+    console.log(`[sso] login ${result.username} (site=${result.site})`);
     const target = redirect || "/";
     const sep = target.includes("#") ? "&" : "#";
     res.redirect(`${target}${sep}sso_token=${encodeURIComponent(result.token)}&sso_user=${encodeURIComponent(result.username)}&sso_site=${encodeURIComponent(result.site || "ixl")}`);
@@ -91,6 +117,17 @@ app.get("/enter", async (req, res) => {
 app.get("/api/sso", async (req, res) => {
   const qs = new URLSearchParams(req.query).toString();
   res.redirect("/enter?" + qs);
+});
+
+app.get("/api/verify", async (req, res) => {
+  try {
+    const token = req.headers["x-ixl-token"] || req.query.token;
+    const payload = await verify(token);
+    if (!payload) return res.status(401).json({ valid: false });
+    res.json({ valid: true, username: payload.u });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, ...sessionStats() }));
@@ -228,9 +265,13 @@ app.post("/api/ixl-creds", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ─── solve ──────────────────────────────────────────────
-app.post("/api/solve", async (req, res) => {
+// ─── solve (Wayground blocked) ──────────────────────────
+app.post("/api/solve", rateLimit(60 * 1000, 60), async (req, res) => {
   try {
+    const referer = (req.headers["referer"] || "").toString();
+    if (/wayground\.com|quizizz\.com/i.test(referer)) {
+      return res.status(403).json({ error: "solver_disabled_for_this_site" });
+    }
     const q = req.body || {};
     if (!q.stem || q.stem.length < 3) return res.status(400).json({ error: "no stem" });
     const cached = await lookupAnswer(q).catch(() => null);
@@ -243,8 +284,12 @@ app.post("/api/solve", async (req, res) => {
   }
 });
 
-app.post("/api/solve-form", async (req, res) => {
+app.post("/api/solve-form", rateLimit(60 * 1000, 30), async (req, res) => {
   try {
+    const referer = (req.headers["referer"] || "").toString();
+    if (/wayground\.com|quizizz\.com/i.test(referer)) {
+      return res.status(403).json({ error: "solver_disabled_for_this_site" });
+    }
     const { questions } = req.body || {};
     if (!Array.isArray(questions) || !questions.length) return res.status(400).json({ error: "no questions" });
 
@@ -336,10 +381,8 @@ app.post("/api/export-dataset", requireOwner, async (req, res) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════
-// HUMANIZE — rewrite AI text to sound human
-// ═══════════════════════════════════════════════════════
-app.post("/api/humanize", async (req, res) => {
+// ─── humanize ───────────────────────────────────────────
+app.post("/api/humanize", rateLimit(60 * 1000, 20), async (req, res) => {
   try {
     const { text, tone, intensity } = req.body || {};
     if (!text || text.length < 20) {
@@ -347,10 +390,10 @@ app.post("/api/humanize", async (req, res) => {
     }
 
     const toneMap = {
-      casual: "casual, like you're texting a friend or posting on Reddit",
+      casual: "casual — like you're texting a friend or posting on Reddit",
       professional: "professional but human — like a competent person writing an email, not a corporate press release",
       academic: "academic but human — like a grad student explaining their work to a peer, not a textbook",
-      neutral: "neutral, natural, like a thoughtful blog post by an actual person"
+      neutral: "neutral, natural — like a thoughtful blog post by an actual person"
     };
     const toneDesc = toneMap[tone] || toneMap.neutral;
 
@@ -361,43 +404,43 @@ app.post("/api/humanize", async (req, res) => {
     };
     const intensityDesc = intensityMap[intensity] || intensityMap.medium;
 
-    const sys = `You rewrite AI-generated text so it reads like a real human wrote it. This is not paraphrasing — it's re-humanizing.
+    const sys = `You rewrite AI-generated text so it reads like a real human wrote it. Not paraphrasing — re-humanizing.
 
 RULES:
-1. Keep the meaning exactly the same. Do not add facts, opinions, or examples.
+1. Keep the meaning exactly the same. Do not add facts or opinions.
 2. Match this tone: ${toneDesc}
 3. ${intensityDesc}
 
-BANNED words/phrases — never use these:
+BANNED words/phrases — never use:
 "delve", "navigating", "landscape", "tapestry", "testament", "furthermore", "moreover",
 "in conclusion", "it's important to note", "it's worth noting", "in today's world",
 "in the realm of", "when it comes to", "at the end of the day", "let's dive in",
 "let's unpack", "more than just", "not just", "pave the way", "stands as", "serves as",
 "plays a crucial role", "plays a vital role", "a myriad of", "a plethora of",
 "leverage", "robust", "seamless", "cutting-edge", "game-changer", "unlock the potential",
-"embark on", "uncover", "shed light on", "shed light", "pave the way for".
+"embark on", "uncover", "shed light on", "pave the way for".
 
 BANNED patterns:
-- Sentences that all start the same way
+- All sentences starting the same way
 - Every paragraph being exactly 3-5 sentences
 - Perfect parallel structure across lists
-- "Not only X, but also Y" constructions
-- Em-dashes used as rhythmic pauses (— every other sentence)
-- Perfectly balanced "on one hand... on the other hand"
-- Any sentence that ends with a neat summary clause
+- "Not only X, but also Y"
+- Em-dashes used as rhythmic pauses
+- Balanced "on one hand / on the other hand"
+- Sentences ending with neat summary clauses
 
-REQUIRED patterns (do these):
-- Mix very short sentences (2-4 words) with longer ones (25-40 words). Aim for high variance.
+REQUIRED patterns:
+- Mix very short sentences (2-4 words) with longer ones (25-40 words). High variance is the point.
 - Use contractions: don't, it's, you're, we've, can't, won't, that's.
 - Start some sentences with And, But, So, Or — real people do this.
-- Use casual connectors: "the thing is", "honestly", "look", "here's the deal", "truth is", "anyway", "so yeah", "at least", "though"
-- Include a hedge or two: "kind of", "sort of", "I think", "probably", "maybe", "roughly"
-- Let one sentence run on a bit longer than it should, with a comma splice or a trailing "which is..."
-- Use "you" and "I" where it fits naturally. First-person is human.
-- Break one "rule" once — start a sentence with a lowercase word if it feels right, or use a fragment. Real writers do.
+- Use casual connectors: "the thing is", "honestly", "look", "here's the deal", "truth is", "anyway", "so yeah", "at least", "though".
+- Include a hedge or two: "kind of", "sort of", "I think", "probably", "maybe", "roughly".
+- Let one sentence run on longer than it should, with a trailing "which is..." or a comma splice.
+- Use "you" and "I" where it fits.
+- Break one rule once — start a sentence lowercase, or use a fragment.
 - Vary paragraph length. One paragraph can be a single sentence.
 
-OUTPUT: Return ONLY the rewritten text. No preamble, no explanation, no quotes around it.`;
+OUTPUT: Return ONLY the rewritten text. No preamble. No explanation. No quotes around it.`;
 
     const geminiKey = await getSecret("GEMINI_API_KEY");
     const groqKey = await getSecret("GROQ_API_KEY");
@@ -409,7 +452,10 @@ OUTPUT: Return ONLY the rewritten text. No preamble, no explanation, no quotes a
       { name: "openrouter", baseURL: "https://openrouter.ai/api/v1", apiKey: openrouterKey, models: ["openrouter/free"] }
     ];
 
+    let rawOut = "";
+    let usedProvider = "";
     let lastErr = null;
+
     for (const p of providers) {
       if (!p.apiKey || /PUT_|your_/i.test(p.apiKey)) continue;
       for (const model of p.models) {
@@ -431,30 +477,200 @@ OUTPUT: Return ONLY the rewritten text. No preamble, no explanation, no quotes a
           if (r.status >= 400) throw new Error(`http ${r.status}`);
           const out = (r.data?.choices?.[0]?.message?.content || "").trim();
           if (!out) throw new Error("empty response");
-          let cleaned = out.replace(/^["']([\s\S]*)["']$/, "$1").trim();
-          return res.json({
-            text: cleaned,
-            source: `${p.name}/${model}`,
-            tone: tone || "neutral",
-            intensity: intensity || "medium"
-          });
+          rawOut = out.replace(/^["']([\s\S]*)["']$/, "$1").trim();
+          usedProvider = `${p.name}/${model}`;
+          break;
         } catch (err) {
           lastErr = err;
           console.warn(`[humanize] ${p.name}/${model} failed: ${err.message}`);
         }
       }
+      if (rawOut) break;
     }
-    res.status(500).json({ error: lastErr?.message || "all providers failed" });
+
+    if (!rawOut) {
+      return res.status(500).json({ error: lastErr?.message || "all providers failed" });
+    }
+
+    const { text: finalText, stats } = postProcessHumanize(rawOut, intensity || "medium");
+
+    res.json({
+      text: finalText,
+      source: usedProvider,
+      tone: tone || "neutral",
+      intensity: intensity || "medium",
+      stats
+    });
   } catch (err) {
     console.error("[humanize]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ═══════════════════════════════════════════════════════
-// AI-LIKELIHOOD CHECKER — heuristic score 0-100
-// ═══════════════════════════════════════════════════════
-app.post("/api/ai-check", async (req, res) => {
+function postProcessHumanize(input, intensity) {
+  let t = String(input || "").trim();
+
+  const bannedRegexes = [
+    /\bfurthermore,?\s+/gi,
+    /\bmoreover,?\s+/gi,
+    /\bin conclusion,?\s+/gi,
+    /\bit'?s important to note that\s+/gi,
+    /\bit'?s worth noting that\s+/gi,
+    /\bin today'?s world,?\s+/gi,
+    /\bwhen it comes to\s+/gi,
+    /\bat the end of the day,?\s+/gi,
+    /\blet'?s dive in[.,]?\s*/gi,
+    /\blet'?s unpack\s+/gi,
+    /\bmore than just\s+/gi,
+    /\bnot only\s+([^,]+),\s+but also\s+/gi,
+    /\bpave[sd]? the way\s+/gi,
+    /\bstands as\s+/gi,
+    /\bserves as\s+/gi,
+    /\bplays a (crucial|vital|key) role in\s+/gi,
+    /\ba myriad of\s+/gi,
+    /\ba plethora of\s+/gi,
+    /\bleverage\b/gi,
+    /\bseamless(ly)?\b/gi,
+    /\bcutting-edge\b/gi,
+    /\bgame-?changer\b/gi,
+    /\bunlock the potential\s+/gi,
+    /\bembark on\s+/gi,
+    /\bshed light on\s+/gi,
+    /\bdelve[sd]? into\s+/gi,
+    /\bnavigating the\s+/gi
+  ];
+  for (const re of bannedRegexes) {
+    t = t.replace(re, (m) => {
+      if (/not only/i.test(m)) return "And ";
+      return "";
+    });
+  }
+
+  t = t.replace(/\s+/g, " ").replace(/\s+([.,!?;:])/g, "$1").trim();
+
+  let sentences = t.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+
+  function stats(arr) {
+    if (!arr.length) return { mean: 0, stdev: 0, ratio: 0 };
+    const lens = arr.map(s => s.split(/\s+/).length);
+    const mean = lens.reduce((a, b) => a + b, 0) / lens.length;
+    const variance = lens.reduce((acc, l) => acc + Math.pow(l - mean, 2), 0) / lens.length;
+    const stdev = Math.sqrt(variance);
+    return { mean, stdev, ratio: stdev / (mean || 1) };
+  }
+
+  let s = stats(sentences);
+  const targetRatio = intensity === "heavy" ? 0.85 : intensity === "medium" ? 0.7 : 0.55;
+  let safety = 0;
+
+  while (s.ratio < targetRatio && safety < 20 && sentences.length > 3) {
+    safety++;
+    const lens = sentences.map(x => x.split(/\s+/).length);
+    const maxIdx = lens.indexOf(Math.max(...lens));
+    const minIdx = lens.indexOf(Math.min(...lens));
+
+    if (lens[maxIdx] > 20) {
+      const longSentence = sentences[maxIdx];
+      const splitAt = findSplitPoint(longSentence);
+      if (splitAt > 0) {
+        const a = longSentence.slice(0, splitAt).trim().replace(/[,;]\s*$/, "") + ".";
+        const b = longSentence.slice(splitAt).trim().replace(/^[,;]\s*/, "");
+        if (b.length > 5) {
+          sentences.splice(maxIdx, 1, a, b);
+          s = stats(sentences);
+          continue;
+        }
+      }
+    }
+
+    if (lens[minIdx] < 8 && minIdx < sentences.length - 1) {
+      const merged = sentences[minIdx].replace(/[.!?]\s*$/, "") + ", and " + sentences[minIdx + 1].replace(/^[A-Z]/, (c) => c.toLowerCase());
+      sentences.splice(minIdx, 2, merged);
+      s = stats(sentences);
+      continue;
+    }
+
+    break;
+  }
+
+  const connectors = ["Honestly, ", "Look, ", "The thing is, ", "Truth is, ", "Anyway, "];
+  let hasConnector = /\b(honestly|look,|the thing is|truth is|anyway)\b/i.test(sentences.join(" "));
+  if (!hasConnector && sentences.length >= 4) {
+    const idx = Math.min(2, sentences.length - 1);
+    const c = connectors[Math.floor(Math.random() * connectors.length)];
+    sentences[idx] = c + sentences[idx].replace(/^[A-Z]/, (ch) => ch.toLowerCase());
+  }
+
+  const hedges = ["kind of", "sort of", "probably", "maybe", "I think", "roughly"];
+  let hasHedge = /\b(kind of|sort of|probably|maybe|i think|roughly)\b/i.test(sentences.join(" "));
+  if (!hasHedge && sentences.length >= 5) {
+    const idx = Math.floor(sentences.length / 2);
+    const h = hedges[Math.floor(Math.random() * hedges.length)];
+    sentences[idx] = sentences[idx].replace(/^([A-Z][a-z]+) /, (m, w) => `${w} ${h} `);
+  }
+
+  let out = sentences.join(" ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([.,!?;:])/g, "$1")
+    .replace(/([.!?])\s+([a-z])/g, (m, p, c) => `${p} ${c.toUpperCase()}`)
+    .trim();
+
+  const stillBanned = /\b(delve|navigat|landscape|tapestry|testament|furthermore|moreover|leverage|seamless|robust|cutting-edge)\b/i;
+  if (stillBanned.test(out)) {
+    out = out.replace(/\b(delve[sd]?|navigat(e|ing|ed)|landscape[s]?|tapestry|testament[s]?|furthermore|moreover|leverage[sd]?|seamless(ly)?|robust|cutting-edge)\b\s*/gi, "");
+    out = out.replace(/\s+/g, " ").trim();
+  }
+
+  const finalStats = stats(out.split(/(?<=[.!?])\s+/).filter(x => x.trim().length > 0));
+  const wordCount = out.split(/\s+/).length;
+  const sentenceCount = out.split(/(?<=[.!?])\s+/).filter(x => x.trim().length > 0).length;
+
+  return {
+    text: out,
+    stats: {
+      wordCount,
+      sentenceCount,
+      avgLen: finalStats.mean.toFixed(1),
+      burstiness: finalStats.ratio.toFixed(2)
+    }
+  };
+}
+
+function findSplitPoint(sentence) {
+  const clean = sentence.trim();
+  const words = clean.split(/\s+/);
+  if (words.length < 14) return -1;
+  const mid = Math.floor(clean.length / 2);
+
+  const candidates = [
+    { re: /,\s+(and|but|so|because|which|while)\s+/g, offset: 1 },
+    { re: /;\s+/g, offset: 0 },
+    { re: /,\s+/g, offset: 0 }
+  ];
+
+  let best = -1;
+  let bestDist = Infinity;
+
+  for (const c of candidates) {
+    let m;
+    c.re.lastIndex = 0;
+    while ((m = c.re.exec(clean)) !== null) {
+      const at = m.index + c.offset;
+      if (at < 8 || at > clean.length - 8) continue;
+      const dist = Math.abs(at - mid);
+      if (dist < bestDist) { bestDist = dist; best = at; }
+    }
+  }
+  if (best < 0) return -1;
+
+  const before = clean.slice(0, best).trim();
+  const after = clean.slice(best).trim().replace(/^[,;]\s*/, "");
+  if (before.split(/\s+/).length < 5 || after.split(/\s+/).length < 5) return -1;
+  return before.length;
+}
+
+// ─── AI-likelihood checker ──────────────────────────────
+app.post("/api/ai-check", rateLimit(60 * 1000, 30), async (req, res) => {
   try {
     const { text } = req.body || {};
     if (!text || text.length < 20) return res.status(400).json({ error: "text too short" });
@@ -467,7 +683,6 @@ app.post("/api/ai-check", async (req, res) => {
     const wordCount = words.length;
     const sentenceCount = sentences.length;
 
-    // 1. Burstiness — variance in sentence length
     const lens = sentences.map(s => s.split(/\s+/).length);
     const avgLen = lens.reduce((a, b) => a + b, 0) / (lens.length || 1);
     const variance = lens.reduce((acc, l) => acc + Math.pow(l - avgLen, 2), 0) / (lens.length || 1);
@@ -477,7 +692,6 @@ app.post("/api/ai-check", async (req, res) => {
     else if (burstiness < 0.55) { score += 10; signals.push(`Moderate burstiness (${burstiness.toFixed(2)}) — could use more variation`); }
     else { signals.push(`Good burstiness (${burstiness.toFixed(2)}) — sentence length varies naturally`); }
 
-    // 2. Banned phrases
     const banned = [
       "delve", "navigating", "landscape", "tapestry", "testament", "furthermore",
       "moreover", "in conclusion", "it's important to note", "it's worth noting",
@@ -496,26 +710,22 @@ app.post("/api/ai-check", async (req, res) => {
       signals.push("No obvious AI-tell phrases detected");
     }
 
-    // 3. Contractions
     const contractionCount = (lowerText.match(/\b\w+'(s|t|re|ve|ll|d|m)\b/g) || []).length;
     const contractionRate = contractionCount / (wordCount || 1);
     if (contractionRate < 0.01) { score += 15; signals.push("Very few contractions — human writing almost always has some"); }
     else if (contractionRate < 0.02) { score += 5; signals.push("Some contractions, could use more"); }
     else { signals.push("Good contraction usage"); }
 
-    // 4. First/second person pronouns
     const youWe = (lowerText.match(/\b(i|i'm|i've|i'll|you|you're|we|we're|we've|my|our|your)\b/g) || []).length;
     const youWeRate = youWe / (wordCount || 1);
     if (youWeRate < 0.005) { score += 10; signals.push("No first/second person — feels distant and report-like"); }
     else { signals.push("Uses first/second person — feels personal"); }
 
-    // 5. Casual connectors
     const casual = ["honestly", "look,", "the thing is", "here's the deal", "truth is", "anyway", "so yeah", "at least", "though", "kind of", "sort of", "pretty much", "a bit"];
     const casualCount = casual.filter(c => lowerText.includes(c)).length;
     if (casualCount === 0) { score += 10; signals.push("No casual connectors — sounds like a manual"); }
     else { signals.push(`Found ${casualCount} casual connector(s)`); }
 
-    // 6. Sentence starting variety
     const starts = sentences.map(s => s.trim().split(/\s+/)[0]?.toLowerCase() || "").filter(Boolean);
     const uniqueStarts = new Set(starts).size;
     const startVariety = uniqueStarts / (starts.length || 1);
@@ -532,12 +742,9 @@ app.post("/api/ai-check", async (req, res) => {
     else if (score >= 20) verdict = "Probably human";
 
     res.json({
-      score,
-      verdict,
-      signals,
+      score, verdict, signals,
       meta: {
-        wordCount,
-        sentenceCount,
+        wordCount, sentenceCount,
         avgLen: avgLen.toFixed(1),
         burstiness: burstiness.toFixed(2)
       }
@@ -548,8 +755,9 @@ app.post("/api/ai-check", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// SESSION start / status / end
+// SESSION endpoints — PER-APP isolated
 // ═══════════════════════════════════════════════════════
+
 app.post("/api/session/start", async (req, res) => {
   try {
     const user = req.ixlUser;
@@ -557,70 +765,71 @@ app.post("/api/session/start", async (req, res) => {
     const { url } = req.body || {};
     const userToken = req.ixlToken || "";
 
-    if (url) {
-      const appId = detectAppFromUrl(url);
-      if (appId) {
-        if (!userCanUseApp(req.ixlUserRecord, appId)) {
-          return res.status(403).json({ error: "app_not_allowed", app: appId });
-        }
-      } else {
-        if (!userCanUseApp(req.ixlUserRecord, "unblock")) {
-          return res.status(403).json({ error: "unblock_not_allowed" });
-        }
+    const targetUrl = url || "https://www.ixl.com/";
+    if (!isSafeUrl(targetUrl)) {
+      return res.status(400).json({ error: "unsafe_url" });
+    }
+
+    const appId = detectAppFromUrl(targetUrl) || "unblock";
+
+    if (appId !== "unblock") {
+      if (!userCanUseApp(req.ixlUserRecord, appId)) {
+        return res.status(403).json({ error: "app_not_allowed", app: appId });
+      }
+    } else {
+      if (!userCanUseApp(req.ixlUserRecord, "unblock")) {
+        return res.status(403).json({ error: "unblock_not_allowed" });
       }
     }
 
-    const existing = getSession(user);
+    const existing = getSession(user, appId);
     if (existing) {
-      touchSession(user);
-      if (url && existing.browser !== "firefox") {
-        try {
-          await safeNavigate(existing.debugUrl, url, existing.browser);
-          console.log(`[session/start] navigated existing ${user} → ${url}`);
-        } catch (err) {
-          console.warn(`[session/start] navigate existing: ${err.message}`);
-        }
-      }
+      touchSession(user, appId);
       return res.json({
         ok: true, ready: true,
-        wsPath: `/session/ws/${user}`,
-        sessionId: existing.sessionId
+        wsPath: `/session/ws/${encodeURIComponent(user)}/${encodeURIComponent(appId)}`,
+        sessionId: existing.sessionId,
+        appId
       });
     }
 
-    const info = getQueueInfo(user);
+    const info = getQueueInfo(user, appId);
     if (info.inQueue) {
       return res.json({
         ok: true, ready: false,
         position: info.position,
         totalActive: info.totalActive,
         maxActive: info.maxActive,
-        queued: info.queued
+        queued: info.queued,
+        appId
       });
     }
 
-    const promise = getOrCreateSession(user, {
-      url: url || "https://www.ixl.com/",
-      token: userToken
-    });
+    const promise = startSession(user, { url: targetUrl, token: userToken, appId });
     const result = await Promise.race([
       promise.then(s => ({ ready: true, sessionId: s.sessionId })),
       new Promise(r => setTimeout(() => r({ ready: false, pending: true }), 500))
     ]);
 
     if (result.ready) {
-      touchSession(user);
-      return res.json({ ok: true, ready: true, wsPath: `/session/ws/${user}`, sessionId: result.sessionId });
+      touchSession(user, appId);
+      return res.json({
+        ok: true, ready: true,
+        wsPath: `/session/ws/${encodeURIComponent(user)}/${encodeURIComponent(appId)}`,
+        sessionId: result.sessionId,
+        appId
+      });
     }
 
     promise.catch(() => { });
-    const info2 = getQueueInfo(user);
+    const info2 = getQueueInfo(user, appId);
     res.json({
       ok: true, ready: false,
       position: info2.position,
       totalActive: info2.totalActive,
       maxActive: info2.maxActive,
-      queued: info2.queued
+      queued: info2.queued,
+      appId
     });
   } catch (err) {
     console.error("[session/start]", err.message);
@@ -632,18 +841,26 @@ app.get("/api/session/status", async (req, res) => {
   try {
     const user = req.ixlUser;
     if (!user) return res.status(401).json({ error: "not logged in" });
-    const s = getSession(user);
+
+    const appId = req.query.appId || detectAppFromUrl(req.query.url || "") || "unblock";
+    const s = getSession(user, appId);
     if (s) {
-      touchSession(user);
-      return res.json({ ok: true, ready: true, sessionId: s.sessionId, wsPath: `/session/ws/${user}` });
+      touchSession(user, appId);
+      return res.json({
+        ok: true, ready: true,
+        sessionId: s.sessionId,
+        wsPath: `/session/ws/${encodeURIComponent(user)}/${encodeURIComponent(appId)}`,
+        appId
+      });
     }
-    const info = getQueueInfo(user);
+    const info = getQueueInfo(user, appId);
     res.json({
       ok: true, ready: false,
       position: info.position,
       totalActive: info.totalActive,
       maxActive: info.maxActive,
-      queued: info.queued
+      queued: info.queued,
+      appId
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -653,7 +870,8 @@ app.get("/api/session/status", async (req, res) => {
 app.post("/api/session/end", async (req, res) => {
   try {
     const user = req.ixlUser;
-    const s = getSession(user);
+    const appId = (req.body && req.body.appId) || req.query.appId || "unblock";
+    const s = getSession(user, appId);
     if (s) await killSession(s.sessionId);
     res.json({ ok: true });
   } catch (err) {
@@ -661,7 +879,6 @@ app.post("/api/session/end", async (req, res) => {
   }
 });
 
-// ─── navigate inside own session ────────────────────────
 app.post("/api/navigate", async (req, res) => {
   const t0 = Date.now();
   try {
@@ -669,9 +886,11 @@ app.post("/api/navigate", async (req, res) => {
     const { url } = req.body || {};
     if (!url) return res.status(400).json({ error: "no url" });
     if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: "only http/https allowed" });
+    if (!isSafeUrl(url)) return res.status(400).json({ error: "unsafe_url" });
 
-    const appId = detectAppFromUrl(url);
-    if (appId) {
+    const appId = detectAppFromUrl(url) || "unblock";
+
+    if (appId !== "unblock") {
       if (!userCanUseApp(req.ixlUserRecord, appId)) {
         return res.status(403).json({ error: "app_not_allowed", app: appId });
       }
@@ -681,10 +900,10 @@ app.post("/api/navigate", async (req, res) => {
       }
     }
 
-    const s = getSession(user);
-    if (!s) return res.status(409).json({ error: "no active session" });
+    const s = getSession(user, appId);
+    if (!s) return res.status(409).json({ error: "no active session", appId });
 
-    touchSession(user);
+    touchSession(user, appId);
 
     if (s.browser === "firefox") {
       return res.status(200).json({
@@ -696,7 +915,7 @@ app.post("/api/navigate", async (req, res) => {
     }
 
     await safeNavigate(s.debugUrl, url, s.browser);
-    console.log(`[navigate] ${user} → ${url} (${Date.now() - t0}ms)`);
+    console.log(`[navigate] ${user}/${appId} → ${url} (${Date.now() - t0}ms)`);
     res.json({ ok: true, dispatched: Date.now() - t0 });
   } catch (err) {
     console.error("[navigate]", err.message);
@@ -705,16 +924,55 @@ app.post("/api/navigate", async (req, res) => {
 });
 
 // ─── noVNC package.json intercept ───────────────────────
+app.get("/session/vnc/:user/:appId/package.json", (req, res) => {
+  res.json({ name: "novnc", version: "1.5.0" });
+});
 app.get("/session/vnc/:user/package.json", (req, res) => {
   res.json({ name: "novnc", version: "1.5.0" });
 });
 
+// ─── helper: resolve session from URL params ────────────
+function resolveSession(username, appId) {
+  if (appId) return getSession(username, appId);
+  // legacy: find any session for this user (first match)
+  const allApps = ["ixl", "blooket", "wayground", "kahoot", "forms", "unblock"];
+  for (const a of allApps) {
+    const s = getSession(username, a);
+    if (s) return s;
+  }
+  return null;
+}
+
 // ─── VNC HTTP proxy ─────────────────────────────────────
+app.get("/session/vnc/:user/:appId/*", async (req, res) => {
+  const username = req.params.user;
+  const appId = req.params.appId;
+  const s = resolveSession(username, appId);
+  if (!s) return res.status(404).send("no session");
+  touchSession(username, s.appId);
+
+  const subPath = "/" + (req.params[0] || "");
+  const opts = {
+    method: req.method,
+    host: "127.0.0.1",
+    port: s.ports.wsPort,
+    path: subPath || "/vnc.html",
+    headers: { ...req.headers, host: `127.0.0.1:${s.ports.wsPort}` }
+  };
+  const proxyReq = http.request(opts, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+  proxyReq.on("error", () => { if (!res.headersSent) res.status(502).send("vnc err"); });
+  req.pipe(proxyReq);
+});
+
+// Legacy: /session/vnc/:user/* without appId
 app.get("/session/vnc/:user/*", async (req, res) => {
   const username = req.params.user;
-  const s = getSession(username);
+  const s = resolveSession(username, null);
   if (!s) return res.status(404).send("no session");
-  touchSession(username);
+  touchSession(username, s.appId);
 
   const subPath = "/" + (req.params[0] || "");
   const opts = {
@@ -736,15 +994,25 @@ app.get("/session/vnc/:user/*", async (req, res) => {
 const server = http.createServer(app);
 
 server.on("upgrade", (req, socket, head) => {
-  const m = req.url.match(/^\/session\/ws\/([^/?]+)/);
-  if (!m) return socket.destroy();
-  const username = decodeURIComponent(m[1]);
-  const s = getSession(username);
+  // Try /session/ws/:user/:appId first, fall back to /session/ws/:user
+  let username = null;
+  let appId = null;
+  let m = req.url.match(/^\/session\/ws\/([^/?]+)\/([^/?]+)/);
+  if (m) {
+    username = decodeURIComponent(m[1]);
+    appId = decodeURIComponent(m[2]);
+  } else {
+    m = req.url.match(/^\/session\/ws\/([^/?]+)/);
+    if (m) username = decodeURIComponent(m[1]);
+  }
+  if (!username) return socket.destroy();
+
+  const s = resolveSession(username, appId);
   if (!s) {
     socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
     return socket.destroy();
   }
-  touchSession(username);
+  touchSession(username, s.appId);
 
   const backendPath = "/websockify";
   const headers = { ...req.headers, host: `127.0.0.1:${s.ports.wsPort}` };
@@ -775,7 +1043,6 @@ server.on("upgrade", (req, socket, head) => {
   proxyReq.end();
 });
 
-// ─── legacy VNC paths ───────────────────────────────────
 app.get("/vnc/*", (req, res) => res.status(410).send("use /session/*"));
 app.get("/vnc", (req, res) => res.status(410).send("use /session/*"));
 
